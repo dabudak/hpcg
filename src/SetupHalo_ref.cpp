@@ -20,9 +20,9 @@
 
 #ifndef HPCG_NO_MPI
 #include <mpi.h>
+#endif
 #include <map>
 #include <set>
-#endif
 
 #ifndef HPCG_NO_OPENMP
 #include <omp.h>
@@ -55,7 +55,31 @@ void SetupHalo_ref(SparseMatrix & A) {
   global_int_t ** mtxIndG = A.mtxIndG;
   local_int_t ** mtxIndL = A.mtxIndL;
 
-#ifdef HPCG_NO_MPI  // In the non-MPI case we simply copy global indices to local index storage
+#ifdef HPCG_NO_LAIK
+#ifdef HPCG_NO_MPI
+  // No LAIK, no MPI: just copy global indices to local storage
+#ifndef HPCG_NO_OPENMP
+  #pragma omp parallel for
+#endif
+  for (local_int_t i=0; i< localNumberOfRows; i++) {
+    int cur_nnz = nonzerosInRow[i];
+    for (int j=0; j<cur_nnz; j++) mtxIndL[i][j] = mtxIndG[i][j];
+  }
+  A.numberOfExternalValues = 0;
+  A.localNumberOfColumns = A.localNumberOfRows;
+  A.numberOfSendNeighbors = 0;
+  A.totalToBeSent = 0;
+  A.elementsToSend = 0;
+  A.neighbors = 0;
+  A.receiveLength = 0;
+  A.sendLength = 0;
+  A.sendBuffer = 0;
+  A.externalLocalToGlobal = 0;
+  return;
+#endif
+#endif
+
+#if defined(HPCG_NO_MPI) && defined(HPCG_NO_LAIK)  // No MPI/LAIK: simply copy global indices to local index storage
 #ifndef HPCG_NO_OPENMP
   #pragma omp parallel for
 #endif
@@ -64,7 +88,7 @@ void SetupHalo_ref(SparseMatrix & A) {
     for (int j=0; j<cur_nnz; j++) mtxIndL[i][j] = mtxIndG[i][j];
   }
 
-#else // Run this section if compiling for MPI
+#else // Run this section if MPI is available or LAIK is enabled
 
   // Scan global IDs of the nonzeros in the matrix.  Determine if the column ID matches a row ID.  If not:
   // 1) We call the ComputeRankOfMatrixRow function, which tells us the rank of the processor owning the row ID.
@@ -118,6 +142,7 @@ void SetupHalo_ref(SparseMatrix & A) {
   // Build the arrays and lists needed by the ExchangeHalo function.
   double * sendBuffer = new double[totalToBeSent];
   local_int_t * elementsToSend = new local_int_t[totalToBeSent];
+  global_int_t * externalLocalToGlobal = new global_int_t[totalToBeReceived];
   int * neighbors = new int[sendList.size()];
   local_int_t * receiveLength = new local_int_t[receiveList.size()];
   local_int_t * sendLength = new local_int_t[sendList.size()];
@@ -131,6 +156,7 @@ void SetupHalo_ref(SparseMatrix & A) {
     sendLength[neighborCount] = sendList[neighborId].size(); // Get count if sends/receives
     for (set_iter i = receiveList[neighborId].begin(); i != receiveList[neighborId].end(); ++i, ++receiveEntryCount) {
       externalToLocalMap[*i] = localNumberOfRows + receiveEntryCount; // The remote columns are indexed at end of internals
+      externalLocalToGlobal[receiveEntryCount] = *i;
     }
     for (set_iter i = sendList[neighborId].begin(); i != sendList[neighborId].end(); ++i, ++sendEntryCount) {
       //if (geom.rank==1) HPCG_fout << "*i, globalToLocalMap[*i], sendEntryCount = " << *i << " " << A.globalToLocalMap[*i] << " " << sendEntryCount << endl;
@@ -164,6 +190,7 @@ void SetupHalo_ref(SparseMatrix & A) {
   A.receiveLength = receiveLength;
   A.sendLength = sendLength;
   A.sendBuffer = sendBuffer;
+  A.externalLocalToGlobal = externalLocalToGlobal;
 
 #ifdef HPCG_DETAILED_DEBUG
   HPCG_fout << " For rank " << A.geom->rank << " of " << A.geom->size << ", number of neighbors = " << A.numberOfSendNeighbors << endl;

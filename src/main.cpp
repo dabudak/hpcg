@@ -40,6 +40,11 @@ using std::endl;
 #include "CheckAspectRatio.hpp"
 #include "GenerateGeometry.hpp"
 #include "GenerateProblem.hpp"
+#include "ComputeSPMV_ref.hpp"
+#include "Geometry.hpp"
+#include "SparseMatrix.hpp"
+#include "Vector.hpp"
+#if 0
 #include "GenerateCoarseProblem.hpp"
 #include "SetupHalo.hpp"
 #include "CheckProblem.hpp"
@@ -53,13 +58,13 @@ using std::endl;
 #include "ComputeResidual.hpp"
 #include "CG.hpp"
 #include "CG_ref.hpp"
-#include "Geometry.hpp"
-#include "SparseMatrix.hpp"
-#include "Vector.hpp"
 #include "CGData.hpp"
 #include "TestCG.hpp"
 #include "TestSymmetry.hpp"
 #include "TestNorms.hpp"
+#endif
+#include "laik/laik_x_vector.hpp"
+#include <laik.h>
 
 /*!
   Main driver program: Construct synthetic problem, run V&V tests, compute benchmark parameters, run benchmark, report results.
@@ -82,7 +87,9 @@ int main(int argc, char * argv[]) {
 
   // Check if QuickPath option is enabled.
   // If the running time is set to zero, we minimize all paths through the program
+#if 0
   bool quickPath = (params.runningTime==0);
+#endif
 
   int size = params.comm_size, rank = params.comm_rank; // Number of MPI processes, My process ID
 
@@ -117,6 +124,14 @@ int main(int argc, char * argv[]) {
   double t1 = mytimer();
 #endif
 
+  // Initialize LAIK before geometry so we can use LAIK world size/rank
+  Laik_Instance* inst = laik_init(&argc, &argv);
+  Laik_Group* world = laik_world(inst);
+  params.comm_size = laik_size(world);
+  params.comm_rank = laik_myid(world);
+  size = params.comm_size;
+  rank = params.comm_rank;
+
   // Construct the geometry and linear system
   Geometry * geom = new Geometry;
   GenerateGeometry(size, rank, params.numThreads, params.pz, params.zl, params.zu, nx, ny, nz, params.npx, params.npy, params.npz, geom);
@@ -126,98 +141,60 @@ int main(int argc, char * argv[]) {
     return ierr;
 
   // Use this array for collecting timing information
+#if 0
   std::vector< double > times(10,0.0);
-
   double setup_time = mytimer();
+#endif
 
   SparseMatrix A;
   InitializeSparseMatrix(A, geom);
 
+  // LAIK already initialized above
+  A.inst = inst;
+  A.world = world;
+
   Vector b, x, xexact;
   GenerateProblem(A, &b, &x, &xexact);
-  SetupHalo(A);
-  int numberOfMgLevels = 4; // Number of levels including first
-  SparseMatrix * curLevelMatrix = &A;
-  for (int level = 1; level< numberOfMgLevels; ++level) {
-    GenerateCoarseProblem(*curLevelMatrix);
-    curLevelMatrix = curLevelMatrix->Ac; // Make the just-constructed coarse grid the next level
+  // Fill host x vector with non-zero values
+  for (local_int_t i = 0; i < x.localLength; ++i) x.values[i] = 1.0;
+  // Fill LAIK x vector with non-zero values
+  {
+    double* xv = 0; uint64_t xcount = 0;
+    laik_get_map_1d(A.x_blob->values, 0, (void**)&xv, &xcount);
+    for (uint64_t i = 0; i < xcount; ++i) xv[i] = 1.0;
   }
+  // --- LAIK SpMV-only path ---
+  std::vector<double> y;
+  ComputeSPMV_ref_laik(A, y);
 
-  setup_time = mytimer() - setup_time; // Capture total time of setup
-  times[9] = setup_time; // Save it for reporting
-
-  curLevelMatrix = &A;
-  Vector * curb = &b;
-  Vector * curx = &x;
-  Vector * curxexact = &xexact;
-  for (int level = 0; level< numberOfMgLevels; ++level) {
-     CheckProblem(*curLevelMatrix, curb, curx, curxexact);
-     curLevelMatrix = curLevelMatrix->Ac; // Make the nextcoarse grid the next level
-     curb = 0; // No vectors after the top level
-     curx = 0;
-     curxexact = 0;
-  }
-
-
-  CGData data;
-  InitializeSparseCGData(A, data);
-
-
-
-  ////////////////////////////////////
-  // Reference SpMV+MG Timing Phase //
-  ////////////////////////////////////
-
-  // Call Reference SpMV and MG. Compute Optimization time as ratio of times in these routines
-
-  local_int_t nrow = A.localNumberOfRows;
-  local_int_t ncol = A.localNumberOfColumns;
-
-  Vector x_overlap, b_computed;
-  InitializeVector(x_overlap, ncol); // Overlapped copy of x vector
-  InitializeVector(b_computed, nrow); // Computed RHS vector
-
-
-  // Record execution time of reference SpMV and MG kernels for reporting times
-  // First load vector with random values
-  FillRandomVector(x_overlap);
-
-  int numberOfCalls = 10;
-  if (quickPath) numberOfCalls = 1; //QuickPath means we do on one call of each block of repetitive code
-  double t_begin = mytimer();
-  for (int i=0; i< numberOfCalls; ++i) {
-    ierr = ComputeSPMV_ref(A, x_overlap, b_computed); // b_computed = A*x_overlap
-    if (ierr) HPCG_fout << "Error in call to SpMV: " << ierr << ".\n" << endl;
-    ierr = ComputeMG_ref(A, b_computed, x_overlap); // b_computed = Minv*y_overlap
-    if (ierr) HPCG_fout << "Error in call to MG: " << ierr << ".\n" << endl;
-  }
-  times[8] = (mytimer() - t_begin)/((double) numberOfCalls);  // Total time divided by number of calls.
-#ifdef HPCG_DEBUG
-  if (rank==0) HPCG_fout << "Total SpMV+MG timing phase execution time in main (sec) = " << mytimer() - t1 << endl;
+  double sum_local = 0.0;
+  for (size_t i = 0; i < y.size(); ++i) sum_local += y[i];
+  double sum = sum_local;
+#ifndef HPCG_NO_MPI
+  MPI_Allreduce(&sum_local, &sum, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
 #endif
 
-  ///////////////////////////////
-  // Reference CG Timing Phase //
-  ///////////////////////////////
-
-#ifdef HPCG_DEBUG
-  t1 = mytimer();
+  double bsum_local = 0.0;
+  for (local_int_t i = 0; i < b.localLength; ++i) bsum_local += b.values[i];
+  double bsum = bsum_local;
+#ifndef HPCG_NO_MPI
+  MPI_Allreduce(&bsum_local, &bsum, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
 #endif
-  int global_failure = 0; // assume all is well: no failures
 
-  int niters = 0;
-  int totalNiters_ref = 0;
-  double normr = 0.0;
-  double normr0 = 0.0;
-  int refMaxIters = 50;
-  numberOfCalls = 1; // Only need to run the residual reduction analysis once
+  if (rank == 0) {
+    std::cout << "SpMV sum: " << sum << std::endl;
+    std::cout << "b sum: " << bsum << std::endl;
+    std::cout << "Diff (SpMV - b): " << (sum - bsum) << std::endl;
+  }
 
-  // Compute the residual reduction for the natural ordering and reference kernels
-  std::vector< double > ref_times(9,0.0);
-  double tolerance = 0.0; // Set tolerance to zero to make all runs do maxIters iterations
-  int err_count = 0;
-  for (int i=0; i< numberOfCalls; ++i) {
-    ZeroVector(x);
+  laik_finalize(inst);
+#ifndef HPCG_NO_MPI
+  MPI_Finalize();
+#endif
+
+  // --- End LAIK SpMV-only path ---
+  return 0;
+  #if 0
     ierr = CG_ref( A, data, b, x, refMaxIters, tolerance, niters, normr, normr0, &ref_times[0], true);
     if (ierr) ++err_count; // count the number of errors in CG
     totalNiters_ref += niters;
@@ -378,4 +355,5 @@ int main(int argc, char * argv[]) {
   MPI_Finalize();
 #endif
   return 0;
+  #endif
 }

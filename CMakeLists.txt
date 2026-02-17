@@ -32,7 +32,11 @@ add_executable( xhpcg src/main.cpp src/CG.cpp src/CG_ref.cpp src/TestCG.cpp
     src/ComputeMG_ref.cpp src/ComputeMG.cpp src/ComputeProlongation_ref.cpp
     src/ComputeRestriction_ref.cpp src/GenerateCoarseProblem.cpp
     src/ComputeOptimalShapeXYZ.cpp src/MixedBaseCounter.cpp
-    src/CheckAspectRatio.cpp src/OutputFile.cpp)
+    src/CheckAspectRatio.cpp src/OutputFile.cpp
+    src/laik/laik_x_vector.cpp)
+
+target_include_directories(xhpcg PRIVATE /home/dbudak/laik/include ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(xhpcg /home/dbudak/laik/liblaik.so)
 
 if (HPCG_ENABLE_CONTIGUOUS_ARRAYS)
     target_compile_definitions(xhpcg PRIVATE HPCG_CONTIGUOUS_ARRAYS)

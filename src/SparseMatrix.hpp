@@ -26,6 +26,7 @@
 #include "Geometry.hpp"
 #include "Vector.hpp"
 #include "MGData.hpp"
+#include <laik.h>
 #if __cplusplus < 201103L
 // for C++03
 #include <map>
@@ -63,15 +64,30 @@ struct SparseMatrix_STRUCT {
   mutable MGData * mgData; // Pointer to the coarse level data for this fine matrix
   void * optimizationData;  // pointer that can be used to store implementation-specific data
 
-#ifndef HPCG_NO_MPI
+  // LAIK-specific fields for vector exchange
+  Laik_Instance* inst;
+  Laik_Group* world;
+  Laik_Space* space;
+  Laik_Partitioning* local;
+  Laik_Partitioning* ext;
+  Laik_Partitioning* rowP;
+  Laik_Partitioning* rowsP;
+  Laik_Data* rowD;
+  Laik_Data* valD;
+  Laik_Data* colD;
+  struct Laik_Blob* x_blob;
+  struct Laik_Blob* b_blob;
   local_int_t numberOfExternalValues; //!< number of entries that are external to this process
+  global_int_t * externalLocalToGlobal; //!< map ext-local index -> global index (length numberOfExternalValues)
   int numberOfSendNeighbors; //!< number of neighboring processes that will be send local data
   local_int_t totalToBeSent; //!< total number of entries to be sent
   local_int_t * elementsToSend; //!< elements to send to neighboring processes
   int * neighbors; //!< neighboring processes
-  local_int_t * receiveLength; //!< lenghts of messages received from neighboring processes
-  local_int_t * sendLength; //!< lenghts of messages sent to neighboring processes
+  local_int_t * receiveLength; //!< lengths of messages received from neighboring processes
+  local_int_t * sendLength; //!< lengths of messages sent to neighboring processes
   double * sendBuffer; //!< send buffer for non-blocking sends
+
+#ifndef HPCG_NO_MPI
 #endif
 };
 typedef struct SparseMatrix_STRUCT SparseMatrix;
@@ -94,6 +110,27 @@ inline void InitializeSparseMatrix(SparseMatrix & A, Geometry * geom) {
   A.mtxIndL = 0;
   A.matrixValues = 0;
   A.matrixDiagonal = 0;
+  A.inst = 0;
+  A.world = 0;
+  A.space = 0;
+  A.local = 0;
+  A.ext = 0;
+  A.rowP = 0;
+  A.rowsP = 0;
+  A.rowD = 0;
+  A.valD = 0;
+  A.colD = 0;
+  A.x_blob = 0;
+  A.b_blob = 0;
+  A.numberOfExternalValues = 0;
+  A.externalLocalToGlobal = 0;
+  A.numberOfSendNeighbors = 0;
+  A.totalToBeSent = 0;
+  A.elementsToSend = 0;
+  A.neighbors = 0;
+  A.receiveLength = 0;
+  A.sendLength = 0;
+  A.sendBuffer = 0;
 
   // Optimization is ON by default. The code that switches it OFF is in the
   // functions that are meant to be optimized.
@@ -102,16 +139,6 @@ inline void InitializeSparseMatrix(SparseMatrix & A, Geometry * geom) {
   A.isMgOptimized      = true;
   A.isWaxpbyOptimized     = true;
 
-#ifndef HPCG_NO_MPI
-  A.numberOfExternalValues = 0;
-  A.numberOfSendNeighbors = 0;
-  A.totalToBeSent = 0;
-  A.elementsToSend = 0;
-  A.neighbors = 0;
-  A.receiveLength = 0;
-  A.sendLength = 0;
-  A.sendBuffer = 0;
-#endif
   A.mgData = 0; // Fine-to-coarse grid transfer initially not defined.
   A.Ac =0;
   return;
@@ -168,13 +195,12 @@ inline void DeleteMatrix(SparseMatrix & A) {
   if (A.matrixValues) delete [] A.matrixValues;
   if (A.matrixDiagonal)           delete [] A.matrixDiagonal;
 
-#ifndef HPCG_NO_MPI
+  if (A.externalLocalToGlobal) delete [] A.externalLocalToGlobal;
   if (A.elementsToSend)       delete [] A.elementsToSend;
   if (A.neighbors)              delete [] A.neighbors;
   if (A.receiveLength)            delete [] A.receiveLength;
   if (A.sendLength)            delete [] A.sendLength;
   if (A.sendBuffer)            delete [] A.sendBuffer;
-#endif
 
   if (A.geom!=0) { DeleteGeometry(*A.geom); delete A.geom; A.geom = 0;}
   if (A.Ac!=0) { DeleteMatrix(*A.Ac); delete A.Ac; A.Ac = 0;} // Delete coarse matrix
