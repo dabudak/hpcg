@@ -18,7 +18,7 @@
  HPCG routine
  */
 
-#ifndef HPCG_NO_MPI
+#if !defined(HPCG_NO_MPI) && defined(HPCG_NO_LAIK)
 #include <mpi.h>
 #include <map>
 #include <set>

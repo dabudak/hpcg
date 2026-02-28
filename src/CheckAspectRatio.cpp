@@ -18,8 +18,9 @@
  */
 
 #include <algorithm>
+#include <cstdlib>
 
-#ifndef HPCG_NO_MPI
+#if !defined(HPCG_NO_MPI) && defined(HPCG_NO_LAIK)
 #include <mpi.h>
 #endif
 
@@ -41,7 +42,11 @@ CheckAspectRatio(double smallest_ratio, int x, int y, int z, const char *what, b
     }
 
 #ifndef HPCG_NO_MPI
-    MPI_Abort(MPI_COMM_WORLD, 127);
+#ifdef HPCG_NO_LAIK
+  MPI_Abort(MPI_COMM_WORLD, 127);
+#else
+  std::abort();
+#endif
 #endif
 
     return 127;

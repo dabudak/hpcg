@@ -1,0 +1,50 @@
+#HEADER
+#  -- High Performance Conjugate Gradient Benchmark (HPCG)
+#     HPCG - 3.1 - March 28, 2019
+#@HEADER
+
+SHELL        = /bin/sh
+CD           = cd
+CP           = cp
+LN_S         = ln -s -f
+MKDIR        = mkdir -p
+RM           = /bin/rm -f
+TOUCH        = touch
+
+TOPdir       = .
+SRCdir       = $(TOPdir)/src
+INCdir       = $(TOPdir)/src
+BINdir       = $(TOPdir)/bin
+
+MPdir        = /home/sys_oneccl/intel/oneapi/mpi/2021.12
+MPinc        = -I$(MPdir)/include
+MPlib        = -Wl,-rpath,$(MPdir)/lib $(MPdir)/lib/libmpi.so.12
+
+# LAIK (built in /home/dbudak/laik)
+DEFS          = -DUSE_MPI -DUSE_TCP2
+LAIKLIB       = /home/dbudak/laik/liblaik.so
+LAIK_INCLUDES = -I/home/dbudak/laik/include -I/home/dbudak/laik/include/laik/
+LAIK_DEFS     = $(DEFS) $(LAIK_INCLUDES)
+
+HPCG_INCLUDES = -I$(INCdir) -I$(INCdir)/$(arch) $(MPinc) $(LAIK_INCLUDES)
+HPCG_LIBS     = $(LAIKLIB) $(MPlib)
+
+# Compile time options
+# -DHPCG_NO_MPI
+# -DHPCG_NO_LAIK
+# -DHPCG_NO_OPENMP
+# -DHPCG_CONTIGUOUS_ARRAYS
+# -DHPCG_DEBUG
+# -DHPCG_DETAILED_DEBUG
+HPCG_OPTS     = -DHPCG_NO_OPENMP
+HPCG_DEFS     = $(HPCG_OPTS) $(HPCG_INCLUDES)
+
+CXX          = g++
+CXXFLAGS     = $(HPCG_DEFS) -O3 -ffast-math -ftree-vectorize -ftree-vectorizer-verbose=0
+
+LINKER       = $(CXX)
+LINKFLAGS    = $(CXXFLAGS)
+
+ARCHIVER     = ar
+ARFLAGS      = r
+RANLIB       = echo

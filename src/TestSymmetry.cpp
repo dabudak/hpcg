@@ -19,7 +19,7 @@
  */
 
 // The MPI include must be first for Windows platforms
-#ifndef HPCG_NO_MPI
+#if !defined(HPCG_NO_MPI) && defined(HPCG_NO_LAIK)
 #include <mpi.h>
 #endif
 #include <fstream>

@@ -109,4 +109,3 @@ void ExchangeHalo(const SparseMatrix & A, Vector & x) {
   return;
 }
 #endif
-// ifndef HPCG_NO_MPI

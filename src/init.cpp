@@ -12,8 +12,14 @@
 // ***************************************************
 //@HEADER
 
-#ifndef HPCG_NO_MPI
+#if !defined(HPCG_NO_MPI) && defined(HPCG_NO_LAIK)
 #include <mpi.h>
+#endif
+
+#ifndef HPCG_NO_LAIK
+#include "laik/laik_runtime.hpp"
+#include "laik/laik_reductions.hpp"
+#include <laik.h>
 #endif
 
 #ifndef HPCG_NO_OPENMP
@@ -114,7 +120,11 @@ HPCG_Init(int * argc_p, char ** *argv_p, HPCG_Params & params) {
 // Broadcast values of iparams to all MPI processes
 #ifndef HPCG_NO_MPI
   if (broadcastParams) {
+#ifdef HPCG_NO_LAIK
     MPI_Bcast( iparams, nparams, MPI_INT, 0, MPI_COMM_WORLD );
+#else
+    laik_broadcast(iparams, iparams, nparams, laik_Int32);
+#endif
   }
 #endif
 
@@ -132,8 +142,13 @@ HPCG_Init(int * argc_p, char ** *argv_p, HPCG_Params & params) {
   params.npz = iparams[9];
 
 #ifndef HPCG_NO_MPI
+#ifdef HPCG_NO_LAIK
   MPI_Comm_rank( MPI_COMM_WORLD, &params.comm_rank );
   MPI_Comm_size( MPI_COMM_WORLD, &params.comm_size );
+#else
+  params.comm_rank = hpcg_laik_world ? laik_myid(hpcg_laik_world) : 0;
+  params.comm_size = hpcg_laik_world ? laik_size(hpcg_laik_world) : 1;
+#endif
 #else
   params.comm_rank = 0;
   params.comm_size = 1;

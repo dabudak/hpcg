@@ -56,7 +56,7 @@ int ComputeSPMV_ref( const SparseMatrix & A, Vector & x, Vector & y) {
   assert(y.localLength>=A.localNumberOfRows);
 
 #ifndef HPCG_NO_MPI
-    ExchangeHalo(A,x);
+  ExchangeHalo(A,x);
 #endif
   const double * const xv = x.values;
   double * const yv = y.values;
@@ -78,7 +78,7 @@ int ComputeSPMV_ref( const SparseMatrix & A, Vector & x, Vector & y) {
 }
 
 // LAIK-based SpMV using A.rowD/valD/colD and A.x_blob
-int ComputeSPMV_ref_laik(const SparseMatrix& A, std::vector<double>& y) {
+int ComputeSPMV_laik_ref(const SparseMatrix& A, std::vector<double>& y) {
   const char* trace = std::getenv("HPCG_LAIK_TRACE");
   if (trace) {
     std::fprintf(stderr, "[rank %d] LAIK SpMV: switch x -> ext\n", A.geom ? A.geom->rank : -1);

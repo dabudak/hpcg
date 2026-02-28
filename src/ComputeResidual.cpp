@@ -17,8 +17,12 @@
 
  HPCG routine
  */
-#ifndef HPCG_NO_MPI
+#if !defined(HPCG_NO_MPI) && defined(HPCG_NO_LAIK)
 #include <mpi.h>
+#endif
+#ifndef HPCG_NO_LAIK
+#include "laik/laik_reductions.hpp"
+#include <laik.h>
 #endif
 #ifndef HPCG_NO_OPENMP
 #include <omp.h>
@@ -77,9 +81,13 @@ int ComputeResidual(const local_int_t n, const Vector & v1, const Vector & v2, d
 #endif
 
 #ifndef HPCG_NO_MPI
-  // Use MPI's reduce function to collect all partial sums
+  // Use a reduce function to collect all partial sums
   double global_residual = 0;
+#ifdef HPCG_NO_LAIK
   MPI_Allreduce(&local_residual, &global_residual, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+#else
+  laik_allreduce(&local_residual, &global_residual, 1, laik_Double, LAIK_RO_Max);
+#endif
   residual = global_residual;
 #else
   residual = local_residual;

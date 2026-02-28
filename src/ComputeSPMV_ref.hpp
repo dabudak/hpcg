@@ -19,6 +19,6 @@
 #include <vector>
 
 int ComputeSPMV_ref( const SparseMatrix & A, Vector  & x, Vector & y);
-int ComputeSPMV_ref_laik(const SparseMatrix& A, std::vector<double>& y);
+int ComputeSPMV_laik_ref(const SparseMatrix& A, std::vector<double>& y);
 
 #endif  // COMPUTESPMV_REF_HPP

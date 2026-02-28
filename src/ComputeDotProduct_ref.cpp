@@ -18,8 +18,14 @@
  HPCG routine
  */
 
-#ifndef HPCG_NO_MPI
+#if !defined(HPCG_NO_MPI) && defined(HPCG_NO_LAIK)
 #include <mpi.h>
+#include "mytimer.hpp"
+#endif
+
+#ifndef HPCG_NO_LAIK
+#include "laik/laik_reductions.hpp"
+#include <laik.h>
 #include "mytimer.hpp"
 #endif
 #ifndef HPCG_NO_OPENMP
@@ -64,11 +70,15 @@ int ComputeDotProduct_ref(const local_int_t n, const Vector & x, const Vector & 
   }
 
 #ifndef HPCG_NO_MPI
-  // Use MPI's reduce function to collect all partial sums
+  // Use a reduce function to collect all partial sums
   double t0 = mytimer();
   double global_result = 0.0;
+#ifdef HPCG_NO_LAIK
   MPI_Allreduce(&local_result, &global_result, 1, MPI_DOUBLE, MPI_SUM,
       MPI_COMM_WORLD);
+#else
+  laik_allreduce(&local_result, &global_result, 1, laik_Double, LAIK_RO_Sum);
+#endif
   result = global_result;
   time_allreduce += mytimer() - t0;
 #else
