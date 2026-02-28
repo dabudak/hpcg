@@ -147,9 +147,8 @@ int ComputeSPMV_ref_laik(const SparseMatrix& A, std::vector<double>& y) {
       assert(row_map);
       int64_t* rp_base = 0; uint64_t rp_len = 0;
       laik_get_map_1d(A.rowD, row_map_no, (void**)&rp_base, &rp_len);
-      assert(row_lfrom_u < rp_len);
-      assert((uint64_t)(rowsHere + 1) <= (rp_len - row_lfrom_u));
-      int64_t* row_ptr = rp_base + (int64_t)row_lfrom_u;
+      assert((uint64_t)(rowsHere + 1) <= rp_len);
+      int64_t* row_ptr = rp_base;
 
       double* val = 0; uint64_t val_len = 0;
       int64_t* col = 0; uint64_t col_len = 0;
