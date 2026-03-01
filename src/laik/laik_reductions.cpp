@@ -12,6 +12,7 @@
     Includes
 */
 #include <cstring>
+#include <cstdint>
 #include <map>
 #include <utility>
 
@@ -74,6 +75,11 @@ void laik_helper(const void * sendBuf, void * recvBuf, uint64_t n, Laik_Type * d
         uint64_t *base; laik_get_map_1d(data, 0, (void **)&base, &count);
         std::memcpy((void *)base, sendBuf, count * sizeof(uint64_t));
     }
+    else if (data_type == laik_Int64)
+    {
+        int64_t *base; laik_get_map_1d(data, 0, (void **)&base, &count);
+        std::memcpy((void *)base, sendBuf, count * sizeof(int64_t));
+    }
 
     // Switch to partitioning created by running "partitioner2", exchange values, and apply reduction "ro_type"
     laik_switchto_new_partitioning(data, world, partitioner2, LAIK_DF_Preserve, ro_type);
@@ -93,6 +99,11 @@ void laik_helper(const void * sendBuf, void * recvBuf, uint64_t n, Laik_Type * d
     {
         uint64_t *base; laik_get_map_1d(data, 0, (void **)&base, &count);
         std::memcpy(recvBuf, (void *)base, count * sizeof(uint64_t));
+    }
+    else if (data_type == laik_Int64)
+    {
+        int64_t *base; laik_get_map_1d(data, 0, (void **)&base, &count);
+        std::memcpy(recvBuf, (void *)base, count * sizeof(int64_t));
     }
 
     return;

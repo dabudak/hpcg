@@ -26,6 +26,7 @@
 #include <cstdlib>
 
 #include "laik/hpcg_laik.hpp"
+#include <laik/data.h>
 
 #endif
 
@@ -177,6 +178,7 @@ void SetupHalo_ref(SparseMatrix & A) {
   A.space = laik_new_space_1d(hpcg_instance, A.totalNumberOfRows);
 
   init_partitionings(A, pt_data_local, pt_data_ext);
+
 #endif // HPCG_NO_LAIK
 
 #ifdef HPCG_DETAILED_DEBUG

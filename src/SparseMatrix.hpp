@@ -92,9 +92,22 @@ using GlobalToLocalMap = std::unordered_map< global_int_t, local_int_t >;
 
 #ifndef HPCG_NO_LAIK
       // ############### Data needed to create partitionings and Laik_Data container
+  Laik_Instance *inst;
+  Laik_Group *world;
       Laik_Space *space;
       Laik_Partitioning *ext;
       Laik_Partitioning *local;
+
+  // LAIK CSR data for SpMV
+  Laik_Space *rowSpacePrefix;
+  Laik_Partitioning *rowP;
+  Laik_Partitioning *rowsP;
+  Laik_Partitioning *rowPrefixP;
+  Laik_Data *rowD;
+  Laik_Data *valD;
+  Laik_Data *colD;
+  Laik_Blob *x_blob;
+  Laik_Blob *b_blob;
 
 #ifdef REPARTITION
 
@@ -165,9 +178,20 @@ inline void InitializeSparseMatrix(SparseMatrix & A, Geometry * geom) {
   A.externalLocalToGlobal.clear();
 
   #ifndef HPCG_NO_LAIK
+  A.inst = 0;
+  A.world = 0;
   A.space = 0;
   A.ext = 0;
   A.local = 0;
+  A.rowSpacePrefix = 0;
+  A.rowP = 0;
+  A.rowsP = 0;
+  A.rowPrefixP = 0;
+  A.rowD = 0;
+  A.valD = 0;
+  A.colD = 0;
+  A.x_blob = 0;
+  A.b_blob = 0;
 
     #ifdef REPARTITION
       A.repartition_me = false;

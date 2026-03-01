@@ -555,6 +555,8 @@ int main(int argc, char *argv[])
 #ifndef HPCG_NO_MPI
   #ifndef HPCG_NO_LAIK
     laik_finalize(hpcg_instance);
+    hpcg_instance = nullptr;
+    world = nullptr;
   #else
     MPI_Finalize();
   #endif

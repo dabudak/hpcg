@@ -95,6 +95,7 @@ struct Laik_Blob
     Functions needed to exchange values via LAIK
 */
 extern void partitioner_alg_for_x_vector(Laik_RangeReceiver *r, Laik_PartitionerParams *p);
+extern void partitioner_alg_for_rows(Laik_RangeReceiver *r, Laik_PartitionerParams *p);
 extern void init_partition_data(SparseMatrix &A, partition_d *local, partition_d *ext);
 extern void init_partitionings(SparseMatrix &A, partition_d *local, partition_d *ext);
 extern void init_partitionings(SparseMatrix &A, partition_d *local, partition_d *ext, Laik_Group *world);

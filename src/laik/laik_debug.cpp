@@ -299,14 +299,24 @@ void print_LaikBlob(Laik_Blob *x)
 
 void exit_hpcg_run(const char *msg, bool wait)
 {
-    if (msg)
-        printf("HPCG error: %s\n", msg);
-
-    if (wait)
+    int rank = 0;
+    if (world)
+        rank = laik_myid(world);
+    if (rank == 0)
     {
-        char c;
-        printf("Press key to continue\n");
-        std::cin.get(c);
+        if (strcmp(msg, "") != 0)
+            printf("\n\n####### %s\n####### Debug DONE -> Exiting #######\n", msg);
+        else
+            printf("\n\n####### Debug DONE -> Exiting #######\n");
     }
-    exit(EXIT_FAILURE);
+    if (wait)
+        while (1)
+            ;
+    if (hpcg_instance)
+    {
+        laik_finalize(hpcg_instance);
+        hpcg_instance = nullptr;
+        world = nullptr;
+    }
+    exit(0);
 }
