@@ -33,5 +33,9 @@ struct TestSymmetryData_STRUCT {
 typedef struct TestSymmetryData_STRUCT TestSymmetryData;
 
 extern int TestSymmetry(SparseMatrix & A, Vector & b, Vector & xexact, TestSymmetryData & testsymmetry_data);
+#ifndef HPCG_NO_LAIK
+struct Laik_Blob;
+extern int TestSymmetry_laik(SparseMatrix &A, Laik_Blob *b, Laik_Blob *xexact, TestSymmetryData &testsymmetry_data);
+#endif
 
 #endif  // TESTSYMMETRY_HPP

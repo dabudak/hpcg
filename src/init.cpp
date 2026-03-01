@@ -12,14 +12,9 @@
 // ***************************************************
 //@HEADER
 
-#if !defined(HPCG_NO_MPI) && defined(HPCG_NO_LAIK)
+#ifndef HPCG_NO_MPI
 #include <mpi.h>
-#endif
-
-#ifndef HPCG_NO_LAIK
-#include "laik/laik_runtime.hpp"
-#include "laik/laik_reductions.hpp"
-#include <laik.h>
+#include "laik/hpcg_laik.hpp"
 #endif
 
 #ifndef HPCG_NO_OPENMP
@@ -54,24 +49,8 @@ startswith(const char * s, const char * prefix) {
   return 1;
 }
 
-/*!
-  Initializes an HPCG run by obtaining problem parameters (from a file or
-  command line) and then broadcasts them to all nodes. It also initializes
-  login I/O streams that are used throughout the HPCG run. Only MPI rank 0
-  performs I/O operations.
-
-  The function assumes that MPI has already been initialized for MPI runs.
-
-  @param[in] argc_p the pointer to the "argc" parameter passed to the main() function
-  @param[in] argv_p the pointer to the "argv" parameter passed to the main() function
-  @param[out] params the reference to the data structures that is filled the basic parameters of the run
-
-  @return returns 0 upon success and non-zero otherwise
-
-  @see HPCG_Finalize
-*/
-int
-HPCG_Init(int * argc_p, char ** *argv_p, HPCG_Params & params) {
+int HPCG_Init(int *argc_p, char ***argv_p, HPCG_Params &params)
+{
   int argc = *argc_p;
   char ** argv = *argv_p;
   char fname[80];
@@ -117,15 +96,17 @@ HPCG_Init(int * argc_p, char ** *argv_p, HPCG_Params & params) {
       iparams[i] = 16;
   }
 
+
+
 // Broadcast values of iparams to all MPI processes
 #ifndef HPCG_NO_MPI
-  if (broadcastParams) {
-#ifdef HPCG_NO_LAIK
-    MPI_Bcast( iparams, nparams, MPI_INT, 0, MPI_COMM_WORLD );
+#ifndef HPCG_NO_LAIK
+    if (broadcastParams)
+      laik_broadcast(iparams, iparams, nparams, laik_Int32);
 #else
-    laik_broadcast(iparams, iparams, nparams, laik_Int32);
+  if (broadcastParams)
+    MPI_Bcast(iparams, nparams, MPI_INT, 0, MPI_COMM_WORLD);
 #endif
-  }
 #endif
 
   params.nx = iparams[0];
@@ -141,14 +122,10 @@ HPCG_Init(int * argc_p, char ** *argv_p, HPCG_Params & params) {
   params.npy = iparams[8];
   params.npz = iparams[9];
 
+
 #ifndef HPCG_NO_MPI
-#ifdef HPCG_NO_LAIK
-  MPI_Comm_rank( MPI_COMM_WORLD, &params.comm_rank );
-  MPI_Comm_size( MPI_COMM_WORLD, &params.comm_size );
-#else
-  params.comm_rank = hpcg_laik_world ? laik_myid(hpcg_laik_world) : 0;
-  params.comm_size = hpcg_laik_world ? laik_size(hpcg_laik_world) : 1;
-#endif
+  params.comm_rank = laik_myid(world);
+  params.comm_size = laik_size(world);
 #else
   params.comm_rank = 0;
   params.comm_size = 1;
@@ -160,7 +137,6 @@ HPCG_Init(int * argc_p, char ** *argv_p, HPCG_Params & params) {
   #pragma omp parallel
   params.numThreads = omp_get_num_threads();
 #endif
-//  for (i = 0; i < nparams; ++i) std::cout << "rank = "<< params.comm_rank << " iparam["<<i<<"] = " << iparams[i] << "\n";
 
   time ( &rawtime );
   ptm = localtime(&rawtime);

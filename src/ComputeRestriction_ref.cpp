@@ -23,20 +23,35 @@
 #include <omp.h>
 #endif
 
+#include "laik/hpcg_laik.hpp"
 #include "ComputeRestriction_ref.hpp"
 
-/*!
-  Routine to compute the coarse residual vector.
+#ifndef HPCG_NO_MPI
+int ComputeRestriction_laik_ref(const SparseMatrix &A, const Laik_Blob *rf)
+{
+  double *rfv;
+  double *rcv;
+  double *Axfv;
 
-  @param[inout]  A - Sparse matrix object containing pointers to mgData->Axf, the fine grid matrix-vector product and mgData->rc the coarse residual vector.
-  @param[in]    rf - Fine grid RHS.
+  laik_get_map_1d(rf->values, 0, (void **)&rfv, 0);
+  laik_get_map_1d(A.mgData->rc_blob->values, 0, (void **)&rcv, 0);
+  laik_get_map_1d(A.mgData->Axf_blob->values, 0, (void **)&Axfv, 0);
 
+  local_int_t *f2c = A.mgData->f2cOperator;
+  local_int_t nc = A.mgData->rc_blob->localLength;
 
-  Note that the fine grid residual is never explicitly constructed.
-  We only compute it for the fine grid points that will be injected into corresponding coarse grid points.
+#ifndef HPCG_NO_OPENMP
+#pragma omp parallel for
+#endif
+  for (local_int_t i = 0; i < nc; ++i)
+  {
+    local_int_t j = f2c[i];
+    rcv[i] = rfv[j] - Axfv[j];
+  }
 
-  @return Returns zero on success and a non-zero value otherwise.
-*/
+  return 0;
+}
+#else
 int ComputeRestriction_ref(const SparseMatrix & A, const Vector & rf) {
 
   double * Axfv = A.mgData->Axf->values;
@@ -52,3 +67,4 @@ int ComputeRestriction_ref(const SparseMatrix & A, const Vector & rf) {
 
   return 0;
 }
+#endif

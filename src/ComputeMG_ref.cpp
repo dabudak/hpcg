@@ -18,47 +18,101 @@
  HPCG routine
  */
 
+#include <cassert>
+#include <iostream>
+
+#include "laik/hpcg_laik.hpp"
 #include "ComputeMG_ref.hpp"
 #include "ComputeSYMGS_ref.hpp"
 #include "ComputeSPMV_ref.hpp"
 #include "ComputeRestriction_ref.hpp"
 #include "ComputeProlongation_ref.hpp"
-#include <cassert>
-#include <iostream>
 
-/*!
+#ifndef HPCG_NO_LAIK
+int ComputeMG_laik_ref(const SparseMatrix &A, const Laik_Blob * r, Laik_Blob * x)
+{
+  assert(x->localLength == A.localNumberOfRows);
+  assert(x->localLength == r->localLength);
 
-  @param[in] A the known system matrix
-  @param[in] r the input vector
-  @param[inout] x On exit contains the result of the multigrid V-cycle with r as the RHS, x is the approximation to Ax = r.
+  ZeroLaikVector(x); // initialize x to zero
 
-  @return returns 0 upon success and non-zero otherwise
+  int ierr = 0;
+  if (A.mgData != 0)
+  { // Go to next coarse level if defined
+    int numberOfPresmootherSteps = A.mgData->numberOfPresmootherSteps;
+    for (int i = 0; i < numberOfPresmootherSteps; ++i) ierr += ComputeSYMGS_laik_ref(A, r, x);
 
-  @see ComputeMG
-*/
-int ComputeMG_ref(const SparseMatrix & A, const Vector & r, Vector & x) {
-  assert(x.localLength==A.localNumberOfColumns); // Make sure x contain space for halo values
+    if (ierr != 0)
+      return ierr;
+    ierr = ComputeSPMV_laik_ref(A, x, A.mgData->Axf_blob);
+    if (ierr != 0)
+      return ierr;
+
+    // Perform restriction operation using simple injection
+    ierr = ComputeRestriction_laik_ref(A, r);
+    if (ierr != 0)
+      return ierr;
+
+    ierr = ComputeMG_laik_ref(*A.Ac, A.mgData->rc_blob, A.mgData->xc_blob);
+    if (ierr != 0)
+      return ierr;
+    ierr = ComputeProlongation_laik_ref(A, x);
+    if (ierr != 0)
+      return ierr;
+    int numberOfPostsmootherSteps = A.mgData->numberOfPostsmootherSteps;
+    for (int i = 0; i < numberOfPostsmootherSteps; ++i)
+      ierr += ComputeSYMGS_laik_ref(A, r, x);
+    if (ierr != 0)
+      return ierr;
+  }
+  else
+  {
+    ierr = ComputeSYMGS_laik_ref(A, r, x);
+    if (ierr != 0)
+      return ierr;
+  }
+  return 0;
+}
+#else
+int ComputeMG_ref(const SparseMatrix &A, const Vector &r, Vector &x)
+{
+  assert(x.localLength == A.localNumberOfColumns); // Make sure x contain space for halo values
 
   ZeroVector(x); // initialize x to zero
 
   int ierr = 0;
-  if (A.mgData!=0) { // Go to next coarse level if defined
+  if (A.mgData != 0)
+  { // Go to next coarse level if defined
     int numberOfPresmootherSteps = A.mgData->numberOfPresmootherSteps;
-    for (int i=0; i< numberOfPresmootherSteps; ++i) ierr += ComputeSYMGS_ref(A, r, x);
-    if (ierr!=0) return ierr;
-    ierr = ComputeSPMV_ref(A, x, *A.mgData->Axf); if (ierr!=0) return ierr;
+    for (int i = 0; i < numberOfPresmootherSteps; ++i)
+      ierr += ComputeSYMGS_ref(A, r, x);
+    if (ierr != 0)
+      return ierr;
+    ierr = ComputeSPMV_ref(A, x, *A.mgData->Axf);
+    if (ierr != 0)
+      return ierr;
     // Perform restriction operation using simple injection
-    ierr = ComputeRestriction_ref(A, r);  if (ierr!=0) return ierr;
-    ierr = ComputeMG_ref(*A.Ac,*A.mgData->rc, *A.mgData->xc);  if (ierr!=0) return ierr;
-    ierr = ComputeProlongation_ref(A, x);  if (ierr!=0) return ierr;
+    ierr = ComputeRestriction_ref(A, r);
+    if (ierr != 0)
+      return ierr;
+    ierr = ComputeMG_ref(*A.Ac, *A.mgData->rc, *A.mgData->xc);
+    if (ierr != 0)
+      return ierr;
+    ierr = ComputeProlongation_ref(A, x);
+    if (ierr != 0)
+      return ierr;
     int numberOfPostsmootherSteps = A.mgData->numberOfPostsmootherSteps;
-    for (int i=0; i< numberOfPostsmootherSteps; ++i) ierr += ComputeSYMGS_ref(A, r, x);
-    if (ierr!=0) return ierr;
+    for (int i = 0; i < numberOfPostsmootherSteps; ++i)
+      ierr += ComputeSYMGS_ref(A, r, x);
+    if (ierr != 0)
+      return ierr;
   }
-  else {
+  else
+  {
     ierr = ComputeSYMGS_ref(A, r, x);
-    if (ierr!=0) return ierr;
+    if (ierr != 0)
+      return ierr;
   }
   return 0;
 }
-
+#endif

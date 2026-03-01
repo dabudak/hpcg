@@ -39,6 +39,10 @@ struct TestCGData_STRUCT {
 typedef struct TestCGData_STRUCT TestCGData;
 
 extern int TestCG(SparseMatrix & A, CGData & data, Vector & b, Vector & x, TestCGData & testcg_data);
+#ifndef HPCG_NO_LAIK
+struct Laik_Blob;
+extern int TestCG_laik(SparseMatrix &A, CGData &data, Laik_Blob *b, Laik_Blob *x, TestCGData &testcg_data);
+#endif
 
 #endif  // TESTCG_HPP
 

@@ -1,3 +1,4 @@
+
 //@HEADER
 // ***************************************************
 //
@@ -20,21 +21,18 @@
 // Main routine of a program that calls the HPCG conjugate gradient
 // solver to solve the problem, and then prints results.
 
+#ifndef HPCG_NO_MPI
 #ifndef HPCG_NO_LAIK
-#include "laik/laik_runtime.hpp"
-#include "laik/laik_reductions.hpp"
-#include "laik/laik_x_vector.hpp"
-#include <laik.h>
-
-#endif
-
-#if !defined(HPCG_NO_MPI)
+#include "laik/hpcg_laik.hpp"
+#else
 #include <mpi.h>
+#endif
 #endif
 
 #include <fstream>
 #include <iostream>
 #include <cstdlib>
+#include <cstring>
 #ifdef HPCG_DETAILED_DEBUG
 using std::cin;
 #endif
@@ -68,68 +66,63 @@ using std::endl;
 #include "TestSymmetry.hpp"
 #include "TestNorms.hpp"
 
-/*!
-  Main driver program: Construct synthetic problem, run V&V tests, compute benchmark parameters, run benchmark, report results.
-
-  @param[in]  argc Standard argument count.  Should equal 1 (no arguments passed in) or 4 (nx, ny, nz passed in)
-  @param[in]  argv Standard argument array.  If argc==1, argv is unused.  If argc==4, argv[1], argv[2], argv[3] will be interpreted as nx, ny, nz, resp.
-
-  @return Returns zero on success and a non-zero value otherwise.
-
-*/
-int main(int argc, char * argv[]) {
+int main(int argc, char *argv[])
+{
 
   HPCG_Params params;
 
-#ifndef HPCG_NO_LAIK
-  Laik_Instance* inst = 0;
-  Laik_Group* world = 0;
-#endif
-
 #ifndef HPCG_NO_MPI
-#ifdef HPCG_NO_LAIK
-  MPI_Init(&argc, &argv);
-#else
-  inst = laik_init(&argc, &argv);
-  world = laik_world(inst);
-  hpcg_set_laik_context(inst, world);
-#endif
-#endif
+  #ifndef HPCG_NO_LAIK
+  hpcg_instance = laik_init(&argc, &argv);
+  world = laik_world(hpcg_instance);
+  #else
+    MPI_Init(&argc, &argv);
+  #endif // HPCG_NO_LAIK
+#endif // HPCG_NO_MPI
 
   HPCG_Init(&argc, &argv, params);
+  printf("LAIK %d\t HI\n", params.comm_rank);
+
+#ifndef HPCG_NO_LAIK
+#ifdef REPARTITION
+  std::memcpy(&hpcg_params, &params, sizeof(params));
+#endif
+#endif
 
   // Check if QuickPath option is enabled.
   // If the running time is set to zero, we minimize all paths through the program
-  bool quickPath = (params.runningTime==0);
+  bool quickPath = (params.runningTime == 0);
 
   int size = params.comm_size, rank = params.comm_rank; // Number of MPI processes, My process ID
 
-#ifdef HPCG_DETAILED_DEBUG
-  if (size < 100 && rank==0) HPCG_fout << "Process "<<rank<<" of "<<size<<" is alive with " << params.numThreads << " threads." <<endl;
+  bool doIO = rank == 0;
 
-  if (rank==0) {
+#ifdef HPCG_DETAILED_DEBUG
+  if (size < 100 && rank == 0)
+    HPCG_fout << "Process " << rank << " of " << size << " is alive with " << params.numThreads << " threads." << endl;
+
+  if (rank == 0)
+  {
+    printf("LAIK %d\tStart Application. %d arguments specified\n\n", rank, argc);
+
     char c;
-    std::cout << "Press key to continue"<< std::endl;
+    std::cout << "Press key to continue" << std::endl;
     std::cin.get(c);
   }
 #ifndef HPCG_NO_MPI
-#ifdef HPCG_NO_LAIK
-  MPI_Barrier(MPI_COMM_WORLD);
-#else
-  laik_barrier();
-#endif
-#endif
-#endif
+  #ifndef HPCG_NO_LAIK
+    laik_barrier();
+  #else
+    MPI_Barrier(MPI_COMM_WORLD);
+  #endif // HPCG_NO_LAIK
+#endif // HPCG_NO_MPI
+#endif // HPCG_DETAILED_DEBUG
 
-  local_int_t nx,ny,nz;
-  nx = (local_int_t)params.nx;
-  ny = (local_int_t)params.ny;
-  nz = (local_int_t)params.nz;
-  int ierr = 0;  // Used to check return codes on function calls
-
-  ierr = CheckAspectRatio(0.125, nx, ny, nz, "local problem", rank==0);
-  if (ierr)
-    return ierr;
+  local_int_t nx, ny, nz;
+  nx = (local_int_t)params.nx; ny = (local_int_t)params.ny; nz = (local_int_t)params.nz;
+  int ierr = 0; // Used to check return codes on function calls
+  ierr = CheckAspectRatio(0.125, nx, ny, nz, "local problem", rank == 0);
+  if (ierr) return ierr;
 
   /////////////////////////
   // Problem setup Phase //
@@ -139,131 +132,200 @@ int main(int argc, char * argv[]) {
   double t1 = mytimer();
 #endif
 
-  // Construct the geometry and linear system
-  Geometry * geom = new Geometry;
-  GenerateGeometry(size, rank, params.numThreads, params.pz, params.zl, params.zu, nx, ny, nz, params.npx, params.npy, params.npz, geom);
-
-  ierr = CheckAspectRatio(0.125, geom->npx, geom->npy, geom->npz, "process grid", rank==0);
-  if (ierr)
-    return ierr;
+#ifndef HPCG_NO_LAIK
+  if (doIO) HPCG_fout << "######## HPCG LAIK v1.2 ########\n#\n# New Features\n#\t-Custom layout: sparse vector\n#\n\n";
+#endif // HPCG_NO_LAIK
 
   // Use this array for collecting timing information
-  std::vector< double > times(10,0.0);
+  std::vector<double> times(10, 0.0);
+
+  // Construct the geometry and linear system
+  Geometry *geom = new Geometry;
+  GenerateGeometry(size, rank, params.numThreads, params.pz, params.zl, params.zu, nx, ny, nz, params.npx, params.npy, params.npz, geom);
+
+  ierr = CheckAspectRatio(0.125, geom->npx, geom->npy, geom->npz, "process grid", rank == 0);
+  if (ierr) return ierr;
+
+  int iter = 0;
+
+#ifndef HPCG_NO_LAIK
+#ifdef REPARTITION
+    // Need this to know, if this proc is a new joining or old initial process.
+    iter = laik_phase(hpcg_instance);
+#endif
+#endif
 
   double setup_time = mytimer();
 
   SparseMatrix A;
   InitializeSparseMatrix(A, geom);
 
-#ifndef HPCG_NO_LAIK
-  A.inst = inst;
-  A.world = world;
-#endif
-
   Vector b, x, xexact;
   GenerateProblem(A, &b, &x, &xexact);
+  SetupHalo(A);
 
 #ifndef HPCG_NO_LAIK
-  // Fill host x vector with non-zero values
-  for (local_int_t i = 0; i < x.localLength; ++i) x.values[i] = 1.0;
-  // Fill LAIK x vector with non-zero values
-  if (A.x_blob && A.x_blob->values) {
-    double* xv = 0; uint64_t xcount = 0;
-    laik_get_map_1d(A.x_blob->values, 0, (void**)&xv, &xcount);
-    for (uint64_t i = 0; i < xcount; ++i) xv[i] = 1.0;
+  std::string name{""};
+  name = "b_l";
+  Laik_Blob *b_l = init_blob(A, false, name.data());
+  name = "x_l";
+  Laik_Blob *x_l = init_blob(A, false, name.data());
+  name = "xexact_l";
+  Laik_Blob *xexact_l = init_blob(A, false, name.data());
+
+  // Only initial processes will do this copy
+  if (iter == 0)
+  {
+    CopyVectorToLaikVector(b, b_l);
+    CopyVectorToLaikVector(x, x_l);
+    CopyVectorToLaikVector(xexact, xexact_l);
+
+    // --- LAIK SpMV correctness check (A * 1 vs b) ---
+    std::string xcheck_name{"x_check"};
+    std::string bcheck_name{"b_check"};
+    Laik_Blob *x_check = init_blob(A, true, xcheck_name.data());
+    Laik_Blob *b_check = init_blob(A, false, bcheck_name.data());
+
+    double *xv = 0;
+    uint64_t xcount = 0;
+    laik_get_map_1d(x_check->values, 0, (void **)&xv, &xcount);
+    for (uint64_t i = 0; i < x_check->localLength; ++i) {
+      xv[i] = 1.0;
+    }
+
+    ComputeSPMV_laik_ref(A, x_check, b_check);
+
+    double local_sum = 0.0;
+    double *bv = 0;
+    laik_get_map_1d(b_check->values, 0, (void **)&bv, 0);
+    for (uint64_t i = 0; i < b_check->localLength; ++i) {
+      local_sum += bv[i];
+    }
+
+    double local_bsum = 0.0;
+    double *bvv = 0;
+    laik_get_map_1d(b_l->values, 0, (void **)&bvv, 0);
+    for (uint64_t i = 0; i < b_l->localLength; ++i) {
+      local_bsum += bvv[i];
+    }
+
+    double sum = 0.0;
+    double bsum = 0.0;
+    laik_allreduce(&local_sum, &sum, 1, laik_Double, LAIK_RO_Sum);
+    laik_allreduce(&local_bsum, &bsum, 1, laik_Double, LAIK_RO_Sum);
+
+    if (rank == 0) {
+      std::cout << "SpMV sum: " << sum << std::endl;
+      std::cout << "b sum: " << bsum << std::endl;
+      std::cout << "Diff (SpMV - b): " << (sum - bsum) << std::endl;
+    }
+
+    DeleteLaikVector(x_check);
+    DeleteLaikVector(b_check);
+    // --- End LAIK SpMV correctness check ---
   }
-  // --- LAIK SpMV correctness check ---
-  std::vector<double> y;
-  ComputeSPMV_laik_ref(A, y);
 
-  double sum_local = 0.0;
-  for (size_t i = 0; i < y.size(); ++i) sum_local += y[i];
-  double sum = sum_local;
-#ifndef HPCG_NO_MPI
-  laik_allreduce(&sum_local, &sum, 1, laik_Double, LAIK_RO_Sum);
+#ifdef REPARTITION
+  A.ptr_to_xexact = xexact_l; /* See @Laik_Blob */
 #endif
+#endif // HPCG_NO_LAIK
 
-  double bsum_local = 0.0;
-  for (local_int_t i = 0; i < b.localLength; ++i) bsum_local += b.values[i];
-  double bsum = bsum_local;
-#ifndef HPCG_NO_MPI
-  laik_allreduce(&bsum_local, &bsum, 1, laik_Double, LAIK_RO_Sum);
-#endif
-
-  if (rank == 0) {
-    std::cout << "SpMV sum: " << sum << std::endl;
-    std::cout << "b sum: " << bsum << std::endl;
-    std::cout << "Diff (SpMV - b): " << (sum - bsum) << std::endl;
-  }
-  // --- End LAIK SpMV correctness check ---
-#endif
 
   int numberOfMgLevels = 4; // Number of levels including first
-  SparseMatrix * curLevelMatrix = &A;
-  for (int level = 1; level< numberOfMgLevels; ++level) {
+  SparseMatrix *curLevelMatrix = &A;
+  for (int level = 1; level < numberOfMgLevels; ++level)
+  {
     GenerateCoarseProblem(*curLevelMatrix);
     curLevelMatrix = curLevelMatrix->Ac; // Make the just-constructed coarse grid the next level
   }
 
   setup_time = mytimer() - setup_time; // Capture total time of setup
-  times[9] = setup_time; // Save it for reporting
+  times[9] = setup_time;               // Save it for reporting
 
   curLevelMatrix = &A;
-  Vector * curb = &b;
-  Vector * curx = &x;
-  Vector * curxexact = &xexact;
-  for (int level = 0; level< numberOfMgLevels; ++level) {
-     CheckProblem(*curLevelMatrix, curb, curx, curxexact);
-     curLevelMatrix = curLevelMatrix->Ac; // Make the nextcoarse grid the next level
-     curb = 0; // No vectors after the top level
-     curx = 0;
-     curxexact = 0;
-  }
+  Vector *curb = &b;
+  Vector *curx = &x;
+  Vector *curxexact = &xexact;
 
+  // Only initial processes will call CheckProblem
+  if(iter == 0)
+  {
+    for (int level = 0; level < numberOfMgLevels; ++level)
+    {
+      CheckProblem(*curLevelMatrix, curb, curx, curxexact);
+      curLevelMatrix = curLevelMatrix->Ac; // Make the nextcoarse grid the next level
+      curb = 0;                            // No vectors after the top level
+      curx = 0;
+      curxexact = 0;
+    }
+  }
 
   CGData data;
   InitializeSparseCGData(A, data);
 
-
-
+  printf("\x1B[34m ROWS: %lld \x1B[0m\n", A.totalNumberOfRows);
   ////////////////////////////////////
   // Reference SpMV+MG Timing Phase //
   ////////////////////////////////////
 
   // Call Reference SpMV and MG. Compute Optimization time as ratio of times in these routines
 
+#ifndef HPCG_NO_LAIK
+  name = "xexact_l";
+  Laik_Blob *x_overlap = init_blob(A, true, name.data());
+  name = "xexact_l";
+  Laik_Blob *b_computed = init_blob(A, false, name.data());
+  // Only initial processes will do this copy
+  if(iter == 0)
+    fillRandomLaikVector(x_overlap);
+#else
   local_int_t nrow = A.localNumberOfRows;
   local_int_t ncol = A.localNumberOfColumns;
-
   Vector x_overlap, b_computed;
-  InitializeVector(x_overlap, ncol); // Overlapped copy of x vector
+  InitializeVector(x_overlap, ncol);  // Overlapped copy of x vector
   InitializeVector(b_computed, nrow); // Computed RHS vector
-
-
   // Record execution time of reference SpMV and MG kernels for reporting times
   // First load vector with random values
   FillRandomVector(x_overlap);
+#endif // HPCG_NO_LAIK
 
   int numberOfCalls = 10;
-  if (quickPath) numberOfCalls = 1; //QuickPath means we do on one call of each block of repetitive code
+
+  if (quickPath) numberOfCalls = 1; // QuickPath means we do on one call of each block of repetitive code
+
   double t_begin = mytimer();
-  for (int i=0; i< numberOfCalls; ++i) {
+  for (int i = 0; i < numberOfCalls; ++i)
+  {
+#ifndef HPCG_NO_LAIK
+    ierr = ComputeSPMV_laik_ref(A, x_overlap, b_computed); // b_computed = A*x_overlap
+#else
     ierr = ComputeSPMV_ref(A, x_overlap, b_computed); // b_computed = A*x_overlap
+#endif
     if (ierr) HPCG_fout << "Error in call to SpMV: " << ierr << ".\n" << endl;
+#ifndef HPCG_NO_LAIK
+    ierr = ComputeMG_laik_ref(A, b_computed, x_overlap); // b_computed = Minv*y_overlap
+#else
     ierr = ComputeMG_ref(A, b_computed, x_overlap); // b_computed = Minv*y_overlap
+#endif
     if (ierr) HPCG_fout << "Error in call to MG: " << ierr << ".\n" << endl;
   }
-  times[8] = (mytimer() - t_begin)/((double) numberOfCalls);  // Total time divided by number of calls.
+
+    if (iter > 0) times[8] = 0; // new processes skipped this part, so store 0
+    else times[8] = (mytimer() - t_begin) / ((double)numberOfCalls); // Total time divided by number of calls.
+
 #ifdef HPCG_DEBUG
-  if (rank==0) HPCG_fout << "Total SpMV+MG timing phase execution time in main (sec) = " << mytimer() - t1 << endl;
+  if (rank == 0)
+    HPCG_fout << "Total SpMV+MG timing phase execution time in main (sec) = " << mytimer() - t1 << endl;
 #endif
+
+  printf("\x1B[31m LAIK %d \t Checkpoint 0 \x1B[0m\n", rank);
 
   ///////////////////////////////
   // Reference CG Timing Phase //
   ///////////////////////////////
 
 #ifdef HPCG_DEBUG
-  t1 = mytimer();
+      t1 = mytimer();
 #endif
   int global_failure = 0; // assume all is well: no failures
 
@@ -275,17 +337,26 @@ int main(int argc, char * argv[]) {
   numberOfCalls = 1; // Only need to run the residual reduction analysis once
 
   // Compute the residual reduction for the natural ordering and reference kernels
-  std::vector< double > ref_times(9,0.0);
+  std::vector<double> ref_times(9, 0.0);
   double tolerance = 0.0; // Set tolerance to zero to make all runs do maxIters iterations
   int err_count = 0;
-  for (int i=0; i< numberOfCalls; ++i) {
+  for (int i = 0; i < numberOfCalls; ++i)
+  {
+#ifndef HPCG_NO_LAIK
+    ZeroLaikVector(x_l);
+    ierr = CG_laik_ref(A, data, b_l, x_l, refMaxIters, tolerance, niters, normr, normr0, &ref_times[0], true);
+#else
     ZeroVector(x);
-    ierr = CG_ref( A, data, b, x, refMaxIters, tolerance, niters, normr, normr0, &ref_times[0], true);
+    ierr = CG_ref(A, data, b, x, refMaxIters, tolerance, niters, normr, normr0, &ref_times[0], true);
+#endif // USE_LAIK
+
     if (ierr) ++err_count; // count the number of errors in CG
     totalNiters_ref += niters;
   }
+
   if (rank == 0 && err_count) HPCG_fout << err_count << " error(s) in call(s) to reference CG." << endl;
   double refTolerance = normr / normr0;
+
 
   // Call user-tunable set up function.
   double t7 = mytimer();
@@ -293,13 +364,19 @@ int main(int argc, char * argv[]) {
   t7 = mytimer() - t7;
   times[7] = t7;
 #ifdef HPCG_DEBUG
-  if (rank==0) HPCG_fout << "Total problem setup time in main (sec) = " << mytimer() - t1 << endl;
+  if (rank == 0)
+    HPCG_fout << "Total problem setup time in main (sec) = " << mytimer() - t1 << endl;
 #endif
 
 #ifdef HPCG_DETAILED_DEBUG
-  if (geom->size == 1) WriteProblem(*geom, A, b, x, xexact);
+// TODO. Copy Laik_blobs to b, x, xexact, if LAIK with one proc is used
+  if (geom->size == 1)
+    WriteProblem(*geom, A, b, x, xexact);
 #endif
 
+  printf("\x1B[34m ROWS: %lld; n \x1B[0m\n", A.totalNumberOfRows);
+
+  printf("\x1B[34m LAIK %d \t  Checkpoint 1 \x1B[0m\n", rank);
 
   //////////////////////////////
   // Validation Testing Phase //
@@ -308,20 +385,32 @@ int main(int argc, char * argv[]) {
 #ifdef HPCG_DEBUG
   t1 = mytimer();
 #endif
+
   TestCGData testcg_data;
   testcg_data.count_pass = testcg_data.count_fail = 0;
+#ifndef HPCG_NO_LAIK
+    TestCG_laik(A, data, b_l, x_l, testcg_data);
+#else
   TestCG(A, data, b, x, testcg_data);
+#endif
 
   TestSymmetryData testsymmetry_data;
+#ifndef HPCG_NO_LAIK
+  TestSymmetry_laik(A, b_l, xexact_l, testsymmetry_data);
+#else
   TestSymmetry(A, b, xexact, testsymmetry_data);
+#endif
 
 #ifdef HPCG_DEBUG
-  if (rank==0) HPCG_fout << "Total validation (TestCG and TestSymmetry) execution time in main (sec) = " << mytimer() - t1 << endl;
+  if (rank == 0)
+    HPCG_fout << "Total validation (TestCG and TestSymmetry) execution time in main (sec) = " << mytimer() - t1 << endl;
 #endif
 
 #ifdef HPCG_DEBUG
   t1 = mytimer();
 #endif
+
+  printf("\x1B[33m LAIK %d \t Checkpoint 2 \x1B[0m\n", rank);
 
   //////////////////////////////
   // Optimized CG Setup Phase //
@@ -333,17 +422,24 @@ int main(int argc, char * argv[]) {
   err_count = 0;
   int tolerance_failures = 0;
 
-  int optMaxIters = 10*refMaxIters;
+  int optMaxIters = 10 * refMaxIters;
   int optNiters = refMaxIters;
   double opt_worst_time = 0.0;
 
-  std::vector< double > opt_times(9,0.0);
-
+  std::vector<double> opt_times(9, 0.0);
   // Compute the residual reduction and residual count for the user ordering and optimized kernels.
-  for (int i=0; i< numberOfCalls; ++i) {
-    ZeroVector(x); // start x at all zeros
+  for (int i = 0; i < numberOfCalls; ++i)
+  {
     double last_cummulative_time = opt_times[0];
-    ierr = CG( A, data, b, x, optMaxIters, refTolerance, niters, normr, normr0, &opt_times[0], true);
+
+#ifndef HPCG_NO_LAIK
+    ZeroLaikVector(x_l); // start x at all zeros
+    ierr = CG_laik(A, data, b_l, x_l, optMaxIters, refTolerance, niters, normr, normr0, &opt_times[0], true);
+#else
+    ZeroVector(x); // start x at all zeros
+    ierr = CG(A, data, b, x, optMaxIters, refTolerance, niters, normr, normr0, &opt_times[0], true);
+#endif
+
     if (ierr) ++err_count; // count the number of errors in CG
     // Convergence check accepts an error of no more than 6 significant digits of relTolerance
     if (normr / normr0 > refTolerance * (1.0 + 1.0e-6)) ++tolerance_failures; // the number of failures to reduce residual
@@ -358,20 +454,22 @@ int main(int argc, char * argv[]) {
 #ifndef HPCG_NO_MPI
   // Get the absolute worst time across all MPI ranks (time in CG can be different)
   double local_opt_worst_time = opt_worst_time;
-#ifdef HPCG_NO_LAIK
-  MPI_Allreduce(&local_opt_worst_time, &opt_worst_time, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
-#else
+#ifndef HPCG_NO_LAIK
   laik_allreduce(&local_opt_worst_time, &opt_worst_time, 1, laik_Double, LAIK_RO_Max);
-#endif
-#endif
+#else
+  MPI_Allreduce(&local_opt_worst_time, &opt_worst_time, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+#endif // HPCG_NO_LAIK
+#endif // HPCG_NO_MPI
 
 
   if (rank == 0 && err_count) HPCG_fout << err_count << " error(s) in call(s) to optimized CG." << endl;
-  if (tolerance_failures) {
+  if (tolerance_failures)
+  {
     global_failure = 1;
-    if (rank == 0)
-      HPCG_fout << "Failed to reduce the residual " << tolerance_failures << " times." << endl;
+    if (rank == 0) HPCG_fout << "Failed to reduce the residual " << tolerance_failures << " times." << endl;
   }
+
+  printf("\x1B[36m LAIK %d \t Checkpoint 3 \x1B[0m\n", rank);
 
   ///////////////////////////////
   // Optimized CG Timing Phase //
@@ -382,9 +480,9 @@ int main(int argc, char * argv[]) {
 
   double total_runtime = params.runningTime;
   int numberOfCgSets = int(total_runtime / opt_worst_time) + 1; // Run at least once, account for rounding
-
 #ifdef HPCG_DEBUG
-  if (rank==0) {
+  if (rank == 0)
+  {
     HPCG_fout << "Projected running time: " << total_runtime << " seconds" << endl;
     HPCG_fout << "Number of CG sets: " << numberOfCgSets << endl;
   }
@@ -393,30 +491,39 @@ int main(int argc, char * argv[]) {
   /* This is the timed run for a specified amount of time. */
 
   optMaxIters = optNiters;
-  double optTolerance = 0.0;  // Force optMaxIters iterations
+  double optTolerance = 0.0; // Force optMaxIters iterations
   TestNormsData testnorms_data;
   testnorms_data.samples = numberOfCgSets;
   testnorms_data.values = new double[numberOfCgSets];
-
-  for (int i=0; i< numberOfCgSets; ++i) {
+  HPCG_fout << "Number of CG sets: " << numberOfCgSets << "\n";
+  for (int i = 0; i < numberOfCgSets; ++i)
+  {
+#ifndef HPCG_NO_LAIK
+    ZeroLaikVector(x_l); // Zero out x
+    ierr = CG_laik(A, data, b_l, x_l, optMaxIters, optTolerance, niters, normr, normr0, &times[0], true);
+#else
     ZeroVector(x); // Zero out x
-    ierr = CG( A, data, b, x, optMaxIters, optTolerance, niters, normr, normr0, &times[0], true);
-    if (ierr) HPCG_fout << "Error in call to CG: " << ierr << ".\n" << endl;
-    if (rank==0) HPCG_fout << "Call [" << i << "] Scaled Residual [" << normr/normr0 << "]" << endl;
-    testnorms_data.values[i] = normr/normr0; // Record scaled residual from this run
-  }
+    ierr = CG(A, data, b, x, optMaxIters, optTolerance, niters, normr, normr0, &times[0], true);
+#endif
 
+    if (ierr) HPCG_fout << "Error in call to CG: " << ierr << ".\n" << endl;
+    if (rank == 0) HPCG_fout << "Call [" << i << "] Scaled Residual [" << normr / normr0 << "]" << endl;
+    testnorms_data.values[i] = normr / normr0; // Record scaled residual from this run
+  }
   // Compute difference between known exact solution and computed solution
   // All processors are needed here.
 #ifdef HPCG_DEBUG
   double residual = 0;
   ierr = ComputeResidual(A.localNumberOfRows, x, xexact, residual);
   if (ierr) HPCG_fout << "Error in call to compute_residual: " << ierr << ".\n" << endl;
-  if (rank==0) HPCG_fout << "Difference between computed and exact  = " << residual << ".\n" << endl;
+  if (rank == 0) HPCG_fout << "Difference between computed and exact  = " << residual << ".\n" << endl;
 #endif
 
   // Test Norm Results
   ierr = TestNorms(testnorms_data);
+  if (ierr) HPCG_fout << "Error in call to TestNorms: " << ierr << ".\n" << endl;
+
+  printf("\x1B[32m LAIK %d \t Checkpoint 4 \x1B[0m\n", rank);
 
   ////////////////////
   // Report Results //
@@ -426,26 +533,33 @@ int main(int argc, char * argv[]) {
   ReportResults(A, numberOfMgLevels, numberOfCgSets, refMaxIters, optMaxIters, &times[0], testcg_data, testsymmetry_data, testnorms_data, global_failure, quickPath);
 
   // Clean up
-  DeleteMatrix(A); // This delete will recursively delete all coarse grid data
   DeleteCGData(data);
-  DeleteVector(x);
-  DeleteVector(b);
-  DeleteVector(xexact);
+
+#ifndef HPCG_NO_LAIK
+  DeleteLaikVector(x_overlap);
+  DeleteLaikVector(b_computed);
+  DeleteLaikVector(x_l);
+  DeleteLaikVector(b_l);
+  DeleteLaikVector(xexact_l);
+
+#else
   DeleteVector(x_overlap);
   DeleteVector(b_computed);
-  delete [] testnorms_data.values;
+#endif
 
-
+  delete[] testnorms_data.values;
 
   HPCG_Finalize();
 
   // Finish up
-#ifndef HPCG_NO_LAIK
-  if (inst) laik_finalize(inst);
-#else
 #ifndef HPCG_NO_MPI
-  MPI_Finalize();
+  #ifndef HPCG_NO_LAIK
+    laik_finalize(hpcg_instance);
+  #else
+    MPI_Finalize();
+  #endif
 #endif
-#endif
+  printf("LAIK %d\tEnding program\n", rank);
+  exit_hpcg_run("Ending program", false);
   return 0;
 }

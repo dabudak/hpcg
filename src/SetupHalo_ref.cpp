@@ -18,16 +18,22 @@
  HPCG routine
  */
 
-#if !defined(HPCG_NO_MPI) && defined(HPCG_NO_LAIK)
-#include <mpi.h>
-#endif
+#ifndef HPCG_NO_MPI
 #include <map>
 #include <set>
+#include <cstring>
+#include <iostream>
+#include <cstdlib>
+
+#include "laik/hpcg_laik.hpp"
+
+#endif
 
 #ifndef HPCG_NO_OPENMP
 #include <omp.h>
 #endif
 
+// #define HPCG_DETAILED_DEBUG
 #ifdef HPCG_DETAILED_DEBUG
 #include <fstream>
 using std::endl;
@@ -38,48 +44,15 @@ using std::endl;
 #include "SetupHalo_ref.hpp"
 #include "mytimer.hpp"
 
-/*!
-  Reference version of SetupHalo that prepares system matrix data structure and creates data necessary
-  for communication of boundary values of this process.
-
-  @param[inout] A    The known system matrix
-
-  @see ExchangeHalo
-*/
 void SetupHalo_ref(SparseMatrix & A) {
 
   // Extract Matrix pieces
-
   local_int_t localNumberOfRows = A.localNumberOfRows;
   char  * nonzerosInRow = A.nonzerosInRow;
   global_int_t ** mtxIndG = A.mtxIndG;
   local_int_t ** mtxIndL = A.mtxIndL;
 
-#ifdef HPCG_NO_LAIK
-#ifdef HPCG_NO_MPI
-  // No LAIK, no MPI: just copy global indices to local storage
-#ifndef HPCG_NO_OPENMP
-  #pragma omp parallel for
-#endif
-  for (local_int_t i=0; i< localNumberOfRows; i++) {
-    int cur_nnz = nonzerosInRow[i];
-    for (int j=0; j<cur_nnz; j++) mtxIndL[i][j] = mtxIndG[i][j];
-  }
-  A.numberOfExternalValues = 0;
-  A.localNumberOfColumns = A.localNumberOfRows;
-  A.numberOfSendNeighbors = 0;
-  A.totalToBeSent = 0;
-  A.elementsToSend = 0;
-  A.neighbors = 0;
-  A.receiveLength = 0;
-  A.sendLength = 0;
-  A.sendBuffer = 0;
-  A.externalLocalToGlobal = 0;
-  return;
-#endif
-#endif
-
-#if defined(HPCG_NO_MPI) && defined(HPCG_NO_LAIK)  // No MPI/LAIK: simply copy global indices to local index storage
+#ifdef HPCG_NO_MPI  // In the non-MPI case we simply copy global indices to local index storage
 #ifndef HPCG_NO_OPENMP
   #pragma omp parallel for
 #endif
@@ -88,7 +61,7 @@ void SetupHalo_ref(SparseMatrix & A) {
     for (int j=0; j<cur_nnz; j++) mtxIndL[i][j] = mtxIndG[i][j];
   }
 
-#else // Run this section if MPI is available or LAIK is enabled
+#else // Run this section if compiling for MPI
 
   // Scan global IDs of the nonzeros in the matrix.  Determine if the column ID matches a row ID.  If not:
   // 1) We call the ComputeRankOfMatrixRow function, which tells us the rank of the processor owning the row ID.
@@ -107,9 +80,7 @@ void SetupHalo_ref(SparseMatrix & A) {
       global_int_t curIndex = mtxIndG[i][j];
       int rankIdOfColumnEntry = ComputeRankOfMatrixRow(*(A.geom), curIndex);
 #ifdef HPCG_DETAILED_DEBUG
-      HPCG_fout << "rank, row , col, globalToLocalMap[col] = " << A.geom->rank << " " << currentGlobalRow << " "
-          << curIndex << " " << A.globalToLocalMap[curIndex] << endl;
-#endif
+#endif  
       if (A.geom->rank!=rankIdOfColumnEntry) {// If column index is not a row index, then it comes from another processor
         receiveList[rankIdOfColumnEntry].insert(curIndex);
         sendList[rankIdOfColumnEntry].insert(currentGlobalRow); // Matrix symmetry means we know the neighbor process wants my value
@@ -126,13 +97,10 @@ void SetupHalo_ref(SparseMatrix & A) {
   for (map_iter curNeighbor = receiveList.begin(); curNeighbor != receiveList.end(); ++curNeighbor) {
     totalToBeReceived += (curNeighbor->second).size();
   }
-
 #ifdef HPCG_DETAILED_DEBUG
-  // These are all attributes that should be true, due to symmetry
   HPCG_fout << "totalToBeSent = " << totalToBeSent << " totalToBeReceived = " << totalToBeReceived << endl;
   assert(totalToBeSent==totalToBeReceived); // Number of sent entry should equal number of received
   assert(sendList.size()==receiveList.size()); // Number of send-to neighbors should equal number of receive-from
-  // Each receive-from neighbor should be a send-to neighbor, and send the same number of entries
   for (map_iter curNeighbor = receiveList.begin(); curNeighbor != receiveList.end(); ++curNeighbor) {
     assert(sendList.find(curNeighbor->first)!=sendList.end());
     assert(sendList[curNeighbor->first].size()==receiveList[curNeighbor->first].size());
@@ -142,7 +110,6 @@ void SetupHalo_ref(SparseMatrix & A) {
   // Build the arrays and lists needed by the ExchangeHalo function.
   double * sendBuffer = new double[totalToBeSent];
   local_int_t * elementsToSend = new local_int_t[totalToBeSent];
-  global_int_t * externalLocalToGlobal = new global_int_t[totalToBeReceived];
   int * neighbors = new int[sendList.size()];
   local_int_t * receiveLength = new local_int_t[receiveList.size()];
   local_int_t * sendLength = new local_int_t[sendList.size()];
@@ -156,13 +123,12 @@ void SetupHalo_ref(SparseMatrix & A) {
     sendLength[neighborCount] = sendList[neighborId].size(); // Get count if sends/receives
     for (set_iter i = receiveList[neighborId].begin(); i != receiveList[neighborId].end(); ++i, ++receiveEntryCount) {
       externalToLocalMap[*i] = localNumberOfRows + receiveEntryCount; // The remote columns are indexed at end of internals
-      externalLocalToGlobal[receiveEntryCount] = *i;
     }
     for (set_iter i = sendList[neighborId].begin(); i != sendList[neighborId].end(); ++i, ++sendEntryCount) {
-      //if (geom.rank==1) HPCG_fout << "*i, globalToLocalMap[*i], sendEntryCount = " << *i << " " << A.globalToLocalMap[*i] << " " << sendEntryCount << endl;
       elementsToSend[sendEntryCount] = A.globalToLocalMap[*i]; // store local ids of entry to send
     }
   }
+
 
   // Convert matrix indices to local IDs
 #ifndef HPCG_NO_OPENMP
@@ -190,7 +156,28 @@ void SetupHalo_ref(SparseMatrix & A) {
   A.receiveLength = receiveLength;
   A.sendLength = sendLength;
   A.sendBuffer = sendBuffer;
-  A.externalLocalToGlobal = externalLocalToGlobal;
+  A.externalLocalToGlobal.assign(A.numberOfExternalValues, 0);
+  for (std::map<global_int_t, local_int_t>::const_iterator it = externalToLocalMap.begin();
+       it != externalToLocalMap.end(); ++it) {
+    local_int_t extLocal = it->second - localNumberOfRows;
+    if (extLocal >= 0 && extLocal < A.numberOfExternalValues) {
+      A.externalLocalToGlobal[extLocal] = it->first;
+    }
+  }
+
+#ifndef HPCG_NO_LAIK
+  // ########## Data for partitioning algorithm
+  partition_d *pt_data_local = (partition_d *)malloc(sizeof(partition_d));
+  partition_d *pt_data_ext = (partition_d *)malloc(sizeof(partition_d));
+
+  std::memcpy((void *)&pt_data_ext->receiveList, (void *)&receiveList, sizeof(receiveList));
+
+  init_partition_data(A, pt_data_local, pt_data_ext);
+
+  A.space = laik_new_space_1d(hpcg_instance, A.totalNumberOfRows);
+
+  init_partitionings(A, pt_data_local, pt_data_ext);
+#endif // HPCG_NO_LAIK
 
 #ifdef HPCG_DETAILED_DEBUG
   HPCG_fout << " For rank " << A.geom->rank << " of " << A.geom->size << ", number of neighbors = " << A.numberOfSendNeighbors << endl;

@@ -18,21 +18,23 @@
  HPCG routine
  */
 
+#include "laik/hpcg_laik.hpp"
 #include "ComputeMG.hpp"
 #include "ComputeMG_ref.hpp"
 
-/*!
-  @param[in] A the known system matrix
-  @param[in] r the input vector
-  @param[inout] x On exit contains the result of the multigrid V-cycle with r as the RHS, x is the approximation to Ax = r.
+#ifndef HPCG_NO_MPI
+int ComputeMG_laik(const SparseMatrix &A, const Laik_Blob *r, Laik_Blob *x)
+{
 
-  @return returns 0 upon success and non-zero otherwise
-
-  @see ComputeMG_ref
-*/
+  // This line and the next two lines should be removed and your version of ComputeSYMGS should be used.
+  A.isMgOptimized = false;
+  return ComputeMG_laik_ref(A, r, x);
+}
+#else
 int ComputeMG(const SparseMatrix  & A, const Vector & r, Vector & x) {
 
   // This line and the next two lines should be removed and your version of ComputeSYMGS should be used.
   A.isMgOptimized = false;
   return ComputeMG_ref(A, r, x);
 }
+#endif

@@ -97,7 +97,7 @@ void partitioner_alg_for_rows(Laik_RangeReceiver* r, Laik_PartitionerParams* p)
   }
 }
 
-Laik_Blob* init_blob(const SparseMatrix& A, bool exchangesValues, char* name, Laik_Partitioning* localP, Laik_Partitioning* extP)
+Laik_Blob* init_blob(const SparseMatrix& A, bool exchangesValues, const char* name, Laik_Partitioning* localP, Laik_Partitioning* extP)
 {
   static_assert(sizeof(global_int_t) == sizeof(int64_t), "global_int_t must be 64-bit for LAIK vector layout");
   Laik_Blob* blob = (Laik_Blob*)malloc(sizeof(Laik_Blob));
@@ -105,24 +105,30 @@ Laik_Blob* init_blob(const SparseMatrix& A, bool exchangesValues, char* name, La
   blob->localLength = A.localNumberOfRows;
   blob->exchangesValues = exchangesValues;
   blob->name = name;
-  laik_data_set_name(blob->values, name);
+  laik_data_set_name(blob->values, const_cast<char*>(name));
 
   // Vector layout with stable external mapping
   Laik_Data_Parameters* params = (Laik_Data_Parameters*)malloc(sizeof(*params));
   params->prefix_row_data = 0;
   params->vector_local_indices = reinterpret_cast<const int64_t*>(A.localToGlobalMap.data());
   params->vector_local_count = (uint64_t)A.localNumberOfRows;
-  params->vector_external_indices = exchangesValues ? reinterpret_cast<const int64_t*>(A.externalLocalToGlobal) : 0;
+  params->vector_external_indices = exchangesValues ? reinterpret_cast<const int64_t*>(A.externalLocalToGlobal.data()) : 0;
   params->vector_external_count = exchangesValues ? (uint64_t)A.numberOfExternalValues : 0;
   laik_data_attach_params(blob->values, params);
   laik_data_set_layout_factory(blob->values, laik_new_layout_vector);
 
   // Initialize with external partitioning to pre-allocate, then switch to local
-  if (exchangesValues)
+  if (exchangesValues && extP)
     laik_switchto_partitioning(blob->values, extP, LAIK_DF_None, LAIK_RO_None);
-  laik_switchto_partitioning(blob->values, localP, LAIK_DF_None, LAIK_RO_None);
+  if (localP)
+    laik_switchto_partitioning(blob->values, localP, LAIK_DF_None, LAIK_RO_None);
 
   return blob;
+}
+
+Laik_Blob* init_blob(const SparseMatrix& A, bool exchangesValues, const char* name)
+{
+  return init_blob(A, exchangesValues, name, A.local, A.ext);
 }
 
 void init_partition_data(SparseMatrix& A, partition_d* local, partition_d* ext)
@@ -130,7 +136,7 @@ void init_partition_data(SparseMatrix& A, partition_d* local, partition_d* ext)
   ext->size = A.totalNumberOfRows;
   ext->geom = A.geom;
   ext->localToGlobalMap = &A.localToGlobalMap;
-  ext->externalLocalToGlobal = A.externalLocalToGlobal;
+  ext->externalLocalToGlobal = A.externalLocalToGlobal.data();
   ext->numberOfExternalValues = A.numberOfExternalValues;
   ext->halo = true;
   ext->receiveList.clear();
@@ -192,6 +198,11 @@ void init_partition_data(SparseMatrix& A, partition_d* local, partition_d* ext)
   local->numberOfExternalValues = 0;
 }
 
+void init_partitionings(SparseMatrix& A, partition_d* local, partition_d* ext)
+{
+  init_partitionings(A, local, ext, world);
+}
+
 void init_partitionings(SparseMatrix& A, partition_d* local, partition_d* ext, Laik_Group* world)
 {
   Laik_Partitioner* x_localPR = laik_new_partitioner(
@@ -205,4 +216,93 @@ void init_partitionings(SparseMatrix& A, partition_d* local, partition_d* ext, L
   Laik_Partitioner* x_extPR = laik_new_partitioner(
       "x_extPR", partitioner_alg_for_x_vector, (void*)ext, LAIK_PF_None);
   A.ext = laik_new_partitioning(x_extPR, world, A.space, NULL);
+}
+
+void ZeroLaikVector(Laik_Blob* x)
+{
+  assert(x);
+
+  double* base;
+  uint64_t count;
+
+  laik_get_map_1d(x->values, 0, (void**)&base, &count);
+
+  for (uint64_t i = 0; i < x->localLength; i++)
+    base[i] = 0.0;
+}
+
+void ScaleLaikVectorValue(Laik_Blob* v, local_int_t index, double value)
+{
+  assert(v);
+  assert(index >= 0 && index < v->localLength);
+
+  double* vv;
+  laik_get_map_1d(v->values, 0, (void**)&vv, 0);
+  vv[index] *= value;
+}
+
+void CopyLaikVectorToLaikVector(Laik_Blob* x, Laik_Blob* y)
+{
+  assert(x->localLength == y->localLength);
+
+  double* xv;
+  double* yv;
+
+  laik_get_map_1d(x->values, 0, (void**)&xv, 0);
+  laik_get_map_1d(y->values, 0, (void**)&yv, 0);
+
+  for (uint64_t i = 0; i < x->localLength; i++)
+    yv[i] = xv[i];
+}
+
+void fillRandomLaikVector(Laik_Blob* x)
+{
+  assert(x);
+
+  double* xv;
+  uint64_t count;
+  laik_get_map_1d(x->values, 0, (void**)&xv, &count);
+  for (uint64_t i = 0; i < x->localLength; i++)
+    xv[i] = i + 1.0;
+}
+
+void CopyVectorToLaikVector(Vector& v, Laik_Blob* x)
+{
+  assert(v.localLength >= x->localLength);
+
+  double* xv;
+  uint64_t count;
+  laik_get_map_1d(x->values, 0, (void**)&xv, &count);
+
+  const double* vv = v.values;
+
+  for (uint64_t i = 0; i < x->localLength; i++)
+    xv[i] = vv[i];
+}
+
+void CopyLaikVectorToVector(const Laik_Blob* x, Vector& v)
+{
+  assert(x->localLength == v.localLength);
+
+  double* xv;
+  uint64_t count;
+  laik_get_map_1d(x->values, 0, (void**)&xv, &count);
+
+  double* vv = v.values;
+
+  for (uint64_t i = 0; i < x->localLength; i++)
+    vv[i] = xv[i];
+}
+
+void CopyLaikVectorToVector(Laik_Blob* x, Vector& v)
+{
+  const Laik_Blob* x_const = x;
+  CopyLaikVectorToVector(x_const, v);
+}
+
+void DeleteLaikVector(Laik_Blob* x)
+{
+  x->localLength = 0;
+  laik_free(x->values);
+  x->values = NULL;
 }

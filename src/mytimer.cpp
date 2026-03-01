@@ -20,11 +20,12 @@
 
 /////////////////////////////////////////////////////////////////////////
 
-#if !defined(HPCG_NO_MPI) && defined(HPCG_NO_LAIK)
-#include <mpi.h>
+#ifndef HPCG_NO_MPI
+#include "laik/hpcg_laik.hpp"
 
-double mytimer(void) {
-  return MPI_Wtime();
+double mytimer(void)
+{
+  return laik_wtime();
 }
 
 #elif !defined(HPCG_NO_OPENMP)

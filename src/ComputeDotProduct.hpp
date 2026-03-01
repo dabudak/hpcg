@@ -14,8 +14,14 @@
 
 #ifndef COMPUTEDOTPRODUCT_HPP
 #define COMPUTEDOTPRODUCT_HPP
+
+#include "laik/hpcg_laik.hpp"
 #include "Vector.hpp"
-int ComputeDotProduct(const local_int_t n, const Vector & x, const Vector & y,
-    double & result, double & time_allreduce, bool & isOptimized);
+
+int ComputeDotProduct_laik(const local_int_t n, const Laik_Blob *x, const Laik_Blob *y,
+                      double &result, double &time_allreduce, bool &isOptimized);
+
+int ComputeDotProduct(const local_int_t n, const Vector &x, const Vector &y,
+                      double &result, double &time_allreduce, bool &isOptimized);
 
 #endif // COMPUTEDOTPRODUCT_HPP

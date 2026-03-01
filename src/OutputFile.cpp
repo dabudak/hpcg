@@ -128,6 +128,14 @@ OutputFile::generate(void) {
   return result;
 }
 
+void
+OutputFile::write(const string & path) {
+  string result = generate();
+  ofstream myfile(path.c_str());
+  myfile << result;
+  myfile.close();
+}
+
 OutputFile * OutputFile::allocKeyVal(const std::string & key_arg, const std::string & value_arg) {
   OutputFile * of = new OutputFile();
   of->setKeyValue(key_arg, value_arg);

@@ -19,51 +19,89 @@
  */
 
 #include "ComputeWAXPBY_ref.hpp"
+#include "laik/hpcg_laik.hpp"
 #ifndef HPCG_NO_OPENMP
 #include <omp.h>
 #endif
 #include <cassert>
-/*!
-  Routine to compute the update of a vector with the sum of two
-  scaled vectors where: w = alpha*x + beta*y
 
-  This is the reference WAXPBY impmentation.  It CANNOT be modified for the
-  purposes of this benchmark.
+int ComputeWAXPBY_laik_ref(const local_int_t n, const double alpha, const Laik_Blob *x,
+                      const double beta, const Laik_Blob *y, const Laik_Blob *w)
+{
 
-  @param[in] n the number of vector elements (on this processor)
-  @param[in] alpha, beta the scalars applied to x and y respectively.
-  @param[in] x, y the input vectors
-  @param[out] w the output vector.
+  assert(x->localLength == n); // Test vector lengths
+  assert(y->localLength == n);
+  assert(w->localLength == n);
 
-  @return returns 0 upon success and non-zero otherwise
+  const double * xv;
+  const double * yv;
+  double * wv;
+  laik_get_map_1d(x->values, 0, (void **)&xv, 0);
+  laik_get_map_1d(y->values, 0, (void **)&yv, 0);
+  laik_get_map_1d(w->values, 0, (void **)&wv, 0);
 
-  @see ComputeWAXPBY
-*/
-int ComputeWAXPBY_ref(const local_int_t n, const double alpha, const Vector & x,
-    const double beta, const Vector & y, Vector & w) {
-
-  assert(x.localLength>=n); // Test vector lengths
-  assert(y.localLength>=n);
-
-  const double * const xv = x.values;
-  const double * const yv = y.values;
-  double * const wv = w.values;
-
-  if (alpha==1.0) {
+  if (alpha == 1.0)
+  {
 #ifndef HPCG_NO_OPENMP
-    #pragma omp parallel for
+#pragma omp parallel for
 #endif
-    for (local_int_t i=0; i<n; i++) wv[i] = xv[i] + beta * yv[i];
-  } else if (beta==1.0) {
+    for (local_int_t i = 0; i < n; i++)
+      wv[i] = xv[i] + beta * yv[i];
+  }
+  else if (beta == 1.0)
+  {
 #ifndef HPCG_NO_OPENMP
-    #pragma omp parallel for
+#pragma omp parallel for
 #endif
-    for (local_int_t i=0; i<n; i++) wv[i] = alpha * xv[i] + yv[i];
-  } else  {
+    for (local_int_t i = 0; i < n; i++)
+      wv[i] = alpha * xv[i] + yv[i];
+  }
+  else
+  {
 #ifndef HPCG_NO_OPENMP
-    #pragma omp parallel for
+#pragma omp parallel for
 #endif
-    for (local_int_t i=0; i<n; i++) wv[i] = alpha * xv[i] + beta * yv[i];
+    for (local_int_t i = 0; i < n; i++)
+      wv[i] = alpha * xv[i] + beta * yv[i];
+  }
+
+  return 0;
+}
+
+int ComputeWAXPBY_ref(const local_int_t n, const double alpha, const Vector &x,
+                      const double beta, const Vector &y, Vector &w)
+{
+
+  assert(x.localLength >= n); // Test vector lengths
+  assert(y.localLength >= n);
+
+  const double *const xv = x.values;
+  const double *const yv = y.values;
+  double *const wv = w.values;
+
+  if (alpha == 1.0)
+  {
+#ifndef HPCG_NO_OPENMP
+#pragma omp parallel for
+#endif
+    for (local_int_t i = 0; i < n; i++)
+      wv[i] = xv[i] + beta * yv[i];
+  }
+  else if (beta == 1.0)
+  {
+#ifndef HPCG_NO_OPENMP
+#pragma omp parallel for
+#endif
+    for (local_int_t i = 0; i < n; i++)
+      wv[i] = alpha * xv[i] + yv[i];
+  }
+  else
+  {
+#ifndef HPCG_NO_OPENMP
+#pragma omp parallel for
+#endif
+    for (local_int_t i = 0; i < n; i++)
+      wv[i] = alpha * xv[i] + beta * yv[i];
   }
 
   return 0;

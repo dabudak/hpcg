@@ -1,83 +1,166 @@
-#include "laik_reductions.hpp"
+/**
+ * @file laik_reductions.cpp
+ * @brief Using LAIK for Allreduction-/Broadcastoperations
+ * @version 1.1
+ * @date 2023-10-13
+ *
+ * @copyright Copyright (c) 2023
+ *
+ */
 
+/*
+    Includes
+*/
 #include <cstring>
 #include <map>
 #include <utility>
 
-#include "laik_runtime.hpp"
+#include "laik_reductions.hpp"
+/*
+    Includes -END
+*/
 
-namespace {
-std::map<std::pair<uint64_t, Laik_Type*>, Laik_Data*> data_objects;
+/*
+    Functions
+*/
 
-void laik_helper(const void* sendBuf, void* recvBuf, uint64_t n, Laik_Type* data_type,
-                 Laik_ReductionOperation ro_type, Laik_Partitioner* p1,
-                 Laik_Partitioner* p2) {
-  if (!hpcg_laik_instance || !hpcg_laik_world) return;
+/* LAIK has a hard limit of "Laik_Data" objects. Reuse "Laik_Data" objects with same size and Laik_Type */
+std::map<std::pair<int, Laik_Type *>, Laik_Data *> data_objects;
 
-  Laik_Data* data = 0;
-  auto key = std::make_pair(n, data_type);
-  auto it = data_objects.find(key);
-  if (it != data_objects.end()) {
-    data = it->second;
-  } else {
-    Laik_Space* space = laik_new_space_1d(hpcg_laik_instance, (int64_t)n);
-    data = laik_new_data(space, data_type);
-    data_objects.insert(std::make_pair(key, data));
-  }
+/**
+ * @brief Helper function to avoid redundant code for operations like Allreduce / Broadcast
+ *
+ * @param[in] sendBuf buffer to be sent
+ * @param[out] recvBuf received bytes will be stored in this buffer
+ * @param[in] n size of send-/recvbuffer
+ * @param[in] data_type of bytes in sendBuf
+ * @param[in] ro_type reduction operation after Allreduce / Broadcast
+ * @param[in] partitioner partitioner algorithm used for the first partitioning
+ * @param[in] partitioner2 partitioner algorithm used for the second partitioning
+ */
+void laik_helper(const void * sendBuf, void * recvBuf, uint64_t n, Laik_Type * data_type, Laik_ReductionOperation ro_type, Laik_Partitioner * partitioner, Laik_Partitioner * partitioner2)
+{
+    // Definition and initialization of laik-specific data (Reuse of laik-specific data, if used more than once)
+    Laik_Data *data;
+    Laik_Space *space;
+    if (data_objects.find({static_cast<int>(n), data_type}) != data_objects.end())
+    {
+        data = data_objects[{static_cast<int>(n), data_type}];
+    }
+    else
+    {
+        space = laik_new_space_1d(hpcg_instance, n);
+        data = laik_new_data(space, data_type);
+        data_objects.insert({{static_cast<int>(n), data_type} , data});
+    }
 
-  laik_switchto_new_partitioning(data, hpcg_laik_world, p1, LAIK_DF_None, LAIK_RO_None);
+    // Switch to partitioning created by running "partitioner"
+    laik_switchto_new_partitioning(data, world, partitioner, LAIK_DF_None, LAIK_RO_None);
 
-  uint64_t count = 0;
-  if (data_type == laik_Int32) {
-    int* base = 0;
-    laik_get_map_1d(data, 0, (void**)&base, &count);
-    std::memcpy((void*)base, sendBuf, count * sizeof(int));
-  } else if (data_type == laik_Double) {
-    double* base = 0;
-    laik_get_map_1d(data, 0, (void**)&base, &count);
-    std::memcpy((void*)base, sendBuf, count * sizeof(double));
-  } else if (data_type == laik_Int64) {
-    int64_t* base = 0;
-    laik_get_map_1d(data, 0, (void**)&base, &count);
-    std::memcpy((void*)base, sendBuf, count * sizeof(int64_t));
-  } else if (data_type == laik_UInt64) {
-    uint64_t* base = 0;
-    laik_get_map_1d(data, 0, (void**)&base, &count);
-    std::memcpy((void*)base, sendBuf, count * sizeof(uint64_t));
-  }
+    // fill sendBuf into container
+    uint64_t count;
+    if (data_type == laik_Int32)
+    {
+        int *base; laik_get_map_1d(data, 0, (void **)&base, &count);
+        std::memcpy((void *)base, sendBuf, count * sizeof(int));
+    }
+    else if (data_type == laik_Double)
+    {
+        double *base; laik_get_map_1d(data, 0, (void **)&base, &count);
+        std::memcpy((void *)base, sendBuf, count * sizeof(double));
+    }
+    else if (data_type == laik_UInt64)
+    {
+        uint64_t *base; laik_get_map_1d(data, 0, (void **)&base, &count);
+        std::memcpy((void *)base, sendBuf, count * sizeof(uint64_t));
+    }
 
-  laik_switchto_new_partitioning(data, hpcg_laik_world, p2, LAIK_DF_Preserve, ro_type);
+    // Switch to partitioning created by running "partitioner2", exchange values, and apply reduction "ro_type"
+    laik_switchto_new_partitioning(data, world, partitioner2, LAIK_DF_Preserve, ro_type);
 
-  if (data_type == laik_Int32) {
-    int* base = 0;
-    laik_get_map_1d(data, 0, (void**)&base, &count);
-    std::memcpy(recvBuf, (void*)base, count * sizeof(int));
-  } else if (data_type == laik_Double) {
-    double* base = 0;
-    laik_get_map_1d(data, 0, (void**)&base, &count);
-    std::memcpy(recvBuf, (void*)base, count * sizeof(double));
-  } else if (data_type == laik_Int64) {
-    int64_t* base = 0;
-    laik_get_map_1d(data, 0, (void**)&base, &count);
-    std::memcpy(recvBuf, (void*)base, count * sizeof(int64_t));
-  } else if (data_type == laik_UInt64) {
-    uint64_t* base = 0;
-    laik_get_map_1d(data, 0, (void**)&base, &count);
-    std::memcpy(recvBuf, (void*)base, count * sizeof(uint64_t));
-  }
+    // Store received result in recvBuf
+    if (data_type == laik_Int32)
+    {
+        int *base; laik_get_map_1d(data, 0, (void **)&base, &count);
+        std::memcpy(recvBuf, (void *) base, count * sizeof(int32_t));
+    }
+    else if (data_type == laik_Double)
+    {
+        double *base; laik_get_map_1d(data, 0, (void **)&base, &count);
+        std::memcpy(recvBuf, (void *) base, count * sizeof(double));
+    }
+    else if (data_type == laik_UInt64)
+    {
+        uint64_t *base; laik_get_map_1d(data, 0, (void **)&base, &count);
+        std::memcpy(recvBuf, (void *)base, count * sizeof(uint64_t));
+    }
+
+    return;
 }
+
+/**
+ * @brief "Allreduce" a buffer based on the ro_type.
+ *
+ * @param[in] sendBuf send buffer
+ * @param[out] recvBuf receive buffer
+ * @param[in] n size of send/recv buffer
+ * @param[in] data_type of the send buffer to be sent
+ * @param[in] ro_type type of reduction to be applied
+ */
+void laik_allreduce(const void *sendBuf, void *recvBuf, uint64_t n, Laik_Type *data_type, Laik_ReductionOperation ro_type)
+{
+    laik_helper(sendBuf, recvBuf, n, data_type, ro_type, laik_All, laik_All);
+    return;
 }
 
-void laik_allreduce(const void* sendBuf, void* recvBuf, uint64_t n, Laik_Type* data_type,
-                    Laik_ReductionOperation ro_type) {
-  laik_helper(sendBuf, recvBuf, n, data_type, ro_type, laik_All, laik_All);
+/**
+ * @brief Broadcast a buffer to all processes in the world (Broadcast done by root process (rank==0)
+ *
+ * @param[in] sendBuf send buffer
+ * @param[out] recvBuf receive buffer
+ * @param[in] n size of buffer
+ * @param[in] data_type of the buffer to be broadcasted
+ */
+void laik_broadcast(const void *sendBuf, void *recvBuf, uint64_t n, Laik_Type *data_type)
+{
+    laik_helper(sendBuf, recvBuf, n, data_type, LAIK_RO_None, laik_Master, laik_All);
+    return;
 }
 
-void laik_broadcast(const void* sendBuf, void* recvBuf, uint64_t n, Laik_Type* data_type) {
-  laik_helper(sendBuf, recvBuf, n, data_type, LAIK_RO_None, laik_Master, laik_All);
+/**
+ * @brief Synchronize all processes
+ */
+void laik_barrier()
+{
+    // arbitrary data
+    int32_t data = 71;
+
+    // Synchronize all processes by making use of an All-to-All-Reduction
+    laik_helper((void *)&data, (void *)&data, 1, laik_Int32, LAIK_RO_None, laik_All, laik_All);
+    return;
 }
 
-void laik_barrier(void) {
-  int32_t data = 0;
-  laik_helper((void*)&data, (void*)&data, 1, laik_Int32, LAIK_RO_None, laik_All, laik_All);
+/**
+ * @brief  Broadcast a buffer to certain processes in the world (Broadcast done by root process (rank==0)
+ *
+ * Not in use yet. Using broadcast instead.
+ *
+ * @param[in] sendBuf send buffer
+ * @param[out] recvBuf receive buffer
+ * @param[in] n size of buffer
+ * @param[in] data_type of the buffer to be broadcasted
+ * @param[in] old_size of the world
+ */
+void laik_partial_broadcast(const void *sendBuf, void *recvBuf, uint64_t n, Laik_Type *data_type, int old_size)
+{
+    printf("WARNING: This is only enabled, if repartitioning should be done!\n");
+#ifdef REPARTITION
+    Laik_Partitioner *partitioner = laik_new_partitioner("Partial_broadcast", new_joining_procs, (void *)&old_size, LAIK_PF_None);
+    laik_helper(sendBuf, recvBuf, n, data_type, LAIK_RO_None, laik_Master, partitioner);
+#endif
+    return;
 }
+
+/*
+    Functions -END
+*/

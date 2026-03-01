@@ -155,6 +155,9 @@ public:
 
   //! Generate output string with results based on the stored key-value hierarchy
   std::string generate(void);
+
+  //! Write output to an explicit file path
+  void write(const std::string & path);
 };
 
 #endif // OUTPUTFILE_HPP

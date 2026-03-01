@@ -14,11 +14,12 @@
 
 #ifndef COMPUTESPMV_REF_HPP
 #define COMPUTESPMV_REF_HPP
+
+#include "laik/hpcg_laik.hpp"
 #include "Vector.hpp"
 #include "SparseMatrix.hpp"
-#include <vector>
 
-int ComputeSPMV_ref( const SparseMatrix & A, Vector  & x, Vector & y);
-int ComputeSPMV_laik_ref(const SparseMatrix& A, std::vector<double>& y);
+int ComputeSPMV_laik_ref(const SparseMatrix &A, Laik_Blob *x, Laik_Blob *y);
+int ComputeSPMV_ref(const SparseMatrix &A, Vector &x, Vector &y);
 
 #endif  // COMPUTESPMV_REF_HPP
