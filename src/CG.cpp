@@ -21,8 +21,11 @@
 #include <fstream>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
+#ifndef HPCG_NO_LAIK
 #include "laik/hpcg_laik.hpp"
+#endif
 #include "hpcg.hpp"
 #include "CG.hpp"
 #include "mytimer.hpp"
@@ -82,17 +85,17 @@ int CG_laik(SparseMatrix &A, CGData &data, Laik_Blob *b, Laik_Blob *x,
   // copy x to p for sparse MV operation
   CopyLaikVectorToLaikVector(x, p);
   if (A.local) {
-    laik_switchto_partitioning(p->values, A.local, LAIK_DF_Preserve, LAIK_RO_None);
+    laik_switchto_partitioning(p->values, A.local, LAIK_DF_Preserve, LAIK_RO_Single);
   }
   TICK(); ComputeSPMV_laik(A, p, Ap); TOCK(t3); // Ap = A*p
   if (A.local) {
-    laik_switchto_partitioning(b->values, A.local, LAIK_DF_Preserve, LAIK_RO_None);
-    laik_switchto_partitioning(Ap->values, A.local, LAIK_DF_Preserve, LAIK_RO_None);
-    laik_switchto_partitioning(r->values, A.local, LAIK_DF_Preserve, LAIK_RO_None);
+    laik_switchto_partitioning(b->values, A.local, LAIK_DF_Preserve, LAIK_RO_Single);
+    laik_switchto_partitioning(Ap->values, A.local, LAIK_DF_Preserve, LAIK_RO_Single);
+    laik_switchto_partitioning(r->values, A.local, LAIK_DF_Preserve, LAIK_RO_Single);
   }
   TICK(); ComputeWAXPBY_laik(nrow, 1.0, b, -1.0, Ap, r, A.isWaxpbyOptimized); TOCK(t2); // r = b - Ax (x stored in p)
   if (A.local) {
-    laik_switchto_partitioning(r->values, A.local, LAIK_DF_Preserve, LAIK_RO_None);
+    laik_switchto_partitioning(r->values, A.local, LAIK_DF_Preserve, LAIK_RO_Single);
   }
   TICK(); ComputeDotProduct_laik(nrow, r, r, normr, t4, A.isDotProductOptimized); TOCK(t1);
   normr = sqrt(normr);
@@ -116,8 +119,8 @@ int CG_laik(SparseMatrix &A, CGData &data, Laik_Blob *b, Laik_Blob *x,
       CopyLaikVectorToLaikVector(r, z); // copy r to z (no preconditioning)
     // Ensure z/r are in local partitioning before dot products.
     if (A.local) {
-      laik_switchto_partitioning(z->values, A.local, LAIK_DF_Preserve, LAIK_RO_None);
-      laik_switchto_partitioning(r->values, A.local, LAIK_DF_Preserve, LAIK_RO_None);
+      laik_switchto_partitioning(z->values, A.local, LAIK_DF_Preserve, LAIK_RO_Single);
+      laik_switchto_partitioning(r->values, A.local, LAIK_DF_Preserve, LAIK_RO_Single);
     }
     TOCK(t5);           // Preconditioner apply time
 
@@ -131,8 +134,8 @@ int CG_laik(SparseMatrix &A, CGData &data, Laik_Blob *b, Laik_Blob *x,
     {
       TICK();
       if (A.local) {
-        laik_switchto_partitioning(z->values, A.local, LAIK_DF_Preserve, LAIK_RO_None);
-        laik_switchto_partitioning(p->values, A.local, LAIK_DF_Preserve, LAIK_RO_None);
+        laik_switchto_partitioning(z->values, A.local, LAIK_DF_Preserve, LAIK_RO_Single);
+        laik_switchto_partitioning(p->values, A.local, LAIK_DF_Preserve, LAIK_RO_Single);
       }
       ComputeWAXPBY_laik(nrow, 1.0, z, 0.0, z, p, A.isWaxpbyOptimized);
       TOCK(t2); // Copy Mr to p
@@ -153,8 +156,8 @@ int CG_laik(SparseMatrix &A, CGData &data, Laik_Blob *b, Laik_Blob *x,
       beta = rtz / oldrtz;
       TICK();
       if (A.local) {
-        laik_switchto_partitioning(z->values, A.local, LAIK_DF_Preserve, LAIK_RO_None);
-        laik_switchto_partitioning(p->values, A.local, LAIK_DF_Preserve, LAIK_RO_None);
+        laik_switchto_partitioning(z->values, A.local, LAIK_DF_Preserve, LAIK_RO_Single);
+        laik_switchto_partitioning(p->values, A.local, LAIK_DF_Preserve, LAIK_RO_Single);
       }
       ComputeWAXPBY_laik(nrow, 1.0, z, beta, p, p, A.isWaxpbyOptimized);
       TOCK(t2); // p = beta*p + z
@@ -165,10 +168,10 @@ int CG_laik(SparseMatrix &A, CGData &data, Laik_Blob *b, Laik_Blob *x,
     TOCK(t3); // Ap = A*p
     // Ensure p/Ap and x/r are local before dot product and updates.
     if (A.local) {
-      laik_switchto_partitioning(p->values, A.local, LAIK_DF_Preserve, LAIK_RO_None);
-      laik_switchto_partitioning(Ap->values, A.local, LAIK_DF_Preserve, LAIK_RO_None);
-      laik_switchto_partitioning(x->values, A.local, LAIK_DF_Preserve, LAIK_RO_None);
-      laik_switchto_partitioning(r->values, A.local, LAIK_DF_Preserve, LAIK_RO_None);
+      laik_switchto_partitioning(p->values, A.local, LAIK_DF_Preserve, LAIK_RO_Single);
+      laik_switchto_partitioning(Ap->values, A.local, LAIK_DF_Preserve, LAIK_RO_Single);
+      laik_switchto_partitioning(x->values, A.local, LAIK_DF_Preserve, LAIK_RO_Single);
+      laik_switchto_partitioning(r->values, A.local, LAIK_DF_Preserve, LAIK_RO_Single);
     }
     TICK();
     ComputeDotProduct_laik(nrow, p, Ap, pAp, t4, A.isDotProductOptimized);

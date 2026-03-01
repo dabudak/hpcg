@@ -25,7 +25,9 @@
 #include <iostream>
 #include <cassert>
 
+#ifndef HPCG_NO_LAIK
 #include "laik/hpcg_laik.hpp"
+#endif
 #include "GenerateCoarseProblem.hpp"
 #include "GenerateGeometry.hpp"
 #include "GenerateProblem.hpp"
@@ -87,7 +89,7 @@ void GenerateCoarseProblem(const SparseMatrix & Af) {
   SparseMatrix *Ac = new SparseMatrix;
   InitializeSparseMatrix(*Ac, geomc);
   GenerateProblem(*Ac, 0, 0, 0);
-#ifdef HPCG_NO_LAIK
+#ifdef Hint mapCount = laik_my_mapcount(A.rowsP);PCG_NO_LAIK
   // GenerateProblem_ref already calls SetupHalo; avoid reinitializing in LAIK builds.
   SetupHalo(*Ac);
 #endif

@@ -17,10 +17,13 @@
 
  HPCG routine
  */
+#ifndef HPCG_NO_LAIK
 #include "laik/hpcg_laik.hpp"
+#endif
 #include "ComputeDotProduct.hpp"
 #include "ComputeDotProduct_ref.hpp"
 
+#ifndef HPCG_NO_LAIK
 int ComputeDotProduct_laik(const local_int_t n, const Laik_Blob *x, const Laik_Blob *y,
                       double &result, double &time_allreduce, bool &isOptimized)
 {
@@ -29,6 +32,7 @@ int ComputeDotProduct_laik(const local_int_t n, const Laik_Blob *x, const Laik_B
   isOptimized = false;
   return ComputeDotProduct_laik_ref(n, x, y, result, time_allreduce);
 }
+#endif
 
 int ComputeDotProduct(const local_int_t n, const Vector &x, const Vector &y,
                       double &result, double &time_allreduce, bool &isOptimized)

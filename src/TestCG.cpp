@@ -32,7 +32,9 @@ using std::endl;
 #include <vector>
 #include <cmath>
 
+#ifndef HPCG_NO_LAIK
 #include "laik/hpcg_laik.hpp"
+#endif
 #include "hpcg.hpp"
 #include "TestCG.hpp"
 #include "CG.hpp"

@@ -14,6 +14,8 @@
 
 #ifndef HPCG_NO_MPI
 #include <mpi.h>
+#endif
+#ifndef HPCG_NO_LAIK
 #include "laik/hpcg_laik.hpp"
 #endif
 
@@ -124,8 +126,13 @@ int HPCG_Init(int *argc_p, char ***argv_p, HPCG_Params &params)
 
 
 #ifndef HPCG_NO_MPI
+#ifndef HPCG_NO_LAIK
   params.comm_rank = laik_myid(world);
   params.comm_size = laik_size(world);
+#else
+  MPI_Comm_rank(MPI_COMM_WORLD, &params.comm_rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &params.comm_size);
+#endif
 #else
   params.comm_rank = 0;
   params.comm_size = 1;

@@ -18,11 +18,13 @@
  HPCG routine
  */
 
+#ifndef HPCG_NO_LAIK
 #include "laik/hpcg_laik.hpp"
+#endif
 #include "ComputeMG.hpp"
 #include "ComputeMG_ref.hpp"
 
-#ifndef HPCG_NO_MPI
+#if !defined(HPCG_NO_MPI) && !defined(HPCG_NO_LAIK)
 int ComputeMG_laik(const SparseMatrix &A, const Laik_Blob *r, Laik_Blob *x)
 {
 

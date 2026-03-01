@@ -21,7 +21,9 @@
 #include <fstream>
 #include <cmath>
 
+#ifndef HPCG_NO_LAIK
 #include "laik/hpcg_laik.hpp"
+#endif
 #include "hpcg.hpp"
 #include "CG_ref.hpp"
 #include "mytimer.hpp"

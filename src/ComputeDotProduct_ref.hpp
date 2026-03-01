@@ -15,11 +15,15 @@
 #ifndef COMPUTEDOTPRODUCT_REF_HPP
 #define COMPUTEDOTPRODUCT_REF_HPP
 
+#ifndef HPCG_NO_LAIK
 #include "laik/hpcg_laik.hpp"
+#endif
 #include "Vector.hpp"
 
+#ifndef HPCG_NO_LAIK
 int ComputeDotProduct_laik_ref(const local_int_t n, const Laik_Blob *x, const Laik_Blob *y,
                           double &result, double &time_allreduce);
+#endif
 
 int ComputeDotProduct_ref(const local_int_t n, const Vector & x, const Vector & y,
     double & result, double & time_allreduce);

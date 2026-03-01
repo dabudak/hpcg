@@ -15,9 +15,13 @@
 #ifndef COMPUTERESIDUAL_HPP
 #define COMPUTERESIDUAL_HPP
 
+#ifndef HPCG_NO_LAIK
 #include "laik/hpcg_laik.hpp"
+#endif
 #include "Vector.hpp"
 
+#ifndef HPCG_NO_LAIK
 int ComputeResidual_laik(const local_int_t n, const Laik_Blob *v1, const Laik_Blob *v2, double &residual);
+#endif
 int ComputeResidual(const local_int_t n, const Vector &v1, const Vector &v2, double &residual);
 #endif // COMPUTERESIDUAL_HPP

@@ -23,10 +23,12 @@
 #include <omp.h>
 #endif
 
+#ifndef HPCG_NO_LAIK
 #include "laik/hpcg_laik.hpp"
+#endif
 #include "ComputeRestriction_ref.hpp"
 
-#ifndef HPCG_NO_MPI
+#if !defined(HPCG_NO_MPI) && !defined(HPCG_NO_LAIK)
 int ComputeRestriction_laik_ref(const SparseMatrix &A, const Laik_Blob *rf)
 {
   double *rfv;

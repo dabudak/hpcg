@@ -22,10 +22,12 @@
 #include <omp.h>
 #endif
 
+#ifndef HPCG_NO_LAIK
 #include "laik/hpcg_laik.hpp"
+#endif
 #include "ComputeProlongation_ref.hpp"
 
-#ifndef HPCG_NO_MPI
+#if !defined(HPCG_NO_MPI) && !defined(HPCG_NO_LAIK)
 int ComputeProlongation_laik_ref(const SparseMatrix & Af, Laik_Blob * xf) {
 
   double * xfv;

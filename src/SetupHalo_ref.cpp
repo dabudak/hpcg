@@ -25,8 +25,10 @@
 #include <iostream>
 #include <cstdlib>
 
+#ifndef HPCG_NO_LAIK
 #include "laik/hpcg_laik.hpp"
 #include <laik/data.h>
+#endif
 
 #endif
 

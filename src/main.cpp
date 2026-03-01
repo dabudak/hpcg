@@ -161,6 +161,60 @@ static void SpmvCheckLaik(const SparseMatrix &A, const char *label)
 }
 #endif
 
+#ifdef HPCG_NO_LAIK
+static void SpmvCheckMPI(const SparseMatrix &A, const Vector &b)
+{
+  Vector x_check, b_check;
+  InitializeVector(x_check, A.localNumberOfColumns);
+  InitializeVector(b_check, A.localNumberOfRows);
+
+  for (local_int_t i = 0; i < x_check.localLength; ++i)
+    x_check.values[i] = 1.0;
+
+  ComputeSPMV_ref(A, x_check, b_check);
+
+  double local_sum = 0.0;
+  for (local_int_t i = 0; i < b_check.localLength; ++i)
+    local_sum += b_check.values[i];
+
+  double local_bsum = 0.0;
+  for (local_int_t i = 0; i < b.localLength; ++i)
+    local_bsum += b.values[i];
+
+  double local_max_diff = 0.0;
+  double local_sum_diff = 0.0;
+  for (local_int_t i = 0; i < A.localNumberOfRows; ++i)
+  {
+    double diff = std::fabs(b_check.values[i] - b.values[i]);
+    if (diff > local_max_diff)
+      local_max_diff = diff;
+    local_sum_diff += diff;
+  }
+
+  double sum = local_sum;
+  double bsum = local_bsum;
+  double max_diff = local_max_diff;
+  double sum_diff = local_sum_diff;
+#ifndef HPCG_NO_MPI
+  MPI_Allreduce(&local_sum, &sum, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+  MPI_Allreduce(&local_bsum, &bsum, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+  MPI_Allreduce(&local_max_diff, &max_diff, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+  MPI_Allreduce(&local_sum_diff, &sum_diff, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+#endif
+
+  if (A.geom && A.geom->rank == 0)
+  {
+    std::cout << "SpMV sum: " << sum << std::endl;
+    std::cout << "b sum: " << bsum << std::endl;
+    std::cout << "Diff (SpMV - b): " << (sum - bsum) << std::endl;
+    std::cout << "SpMV check: max diff=" << max_diff << " sum diff=" << sum_diff << std::endl;
+  }
+
+  DeleteVector(x_check);
+  DeleteVector(b_check);
+}
+#endif
+
 int main(int argc, char *argv[])
 {
 
@@ -176,7 +230,18 @@ int main(int argc, char *argv[])
 #endif // HPCG_NO_MPI
 
   HPCG_Init(&argc, &argv, params);
+
+  double program_start = mytimer();
+#ifndef HPCG_NO_LAIK
+  const char* phase_timing = std::getenv("HPCG_LAIK_PHASE_TIME");
+#else
+  const char* phase_timing = std::getenv("HPCG_MPI_PHASE_TIME");
+#endif
+#ifndef HPCG_NO_LAIK
   printf("LAIK %d\t HI\n", params.comm_rank);
+#else
+  printf("MPI %d\t HI\n", params.comm_rank);
+#endif
 
 #ifndef HPCG_NO_LAIK
 #ifdef REPARTITION
@@ -260,6 +325,10 @@ int main(int argc, char *argv[])
 #ifdef HPCG_NO_LAIK
   // GenerateProblem_ref already calls SetupHalo; avoid reinitializing in LAIK builds.
   SetupHalo(A);
+
+  // --- MPI SpMV correctness check (A * 1 vs b) ---
+  SpmvCheckMPI(A, b);
+  // --- End MPI SpMV correctness check ---
 #endif
 
 #ifndef HPCG_NO_LAIK
@@ -339,6 +408,7 @@ int main(int argc, char *argv[])
     curLevelMatrix = curLevelMatrix->Ac; // Make the just-constructed coarse grid the next level
   }
 
+#ifndef HPCG_NO_LAIK
   if (iter == 0) {
     SparseMatrix *checkLevel = A.Ac;
     for (int level = 1; level < numberOfMgLevels && checkLevel; ++level) {
@@ -347,6 +417,7 @@ int main(int argc, char *argv[])
       checkLevel = checkLevel->Ac;
     }
   }
+#endif
 
   setup_time = mytimer() - setup_time; // Capture total time of setup
   times[9] = setup_time;               // Save it for reporting
@@ -671,6 +742,8 @@ int main(int argc, char *argv[])
   #endif
 #endif
   printf("LAIK %d\tEnding program\n", rank);
+#ifndef HPCG_NO_LAIK
   exit_hpcg_run("Ending program", false);
+#endif
   return 0;
 }

@@ -24,6 +24,7 @@ typedef long long allocation_int_t; // Index to the allocation buffer
 /*
     Includes
 */
+#ifndef HPCG_NO_LAIK
 extern "C"
 {
 #include <laik.h>
@@ -36,6 +37,17 @@ extern "C"
 #ifdef REPARTITION
 #include "laik_repartition.hpp"
 #endif
+#else
+struct Laik_Instance;
+struct Laik_Group;
+struct Laik_Blob;
+struct Laik_Space;
+struct Laik_Partitioning;
+struct Laik_Data;
+struct Laik_Mapping;
+struct Laik_TaskRange;
+struct Laik_Range;
+#endif
 /*
     Includes -END
 */
@@ -43,9 +55,11 @@ extern "C"
 /*
     Important global variables
 */
+#ifndef HPCG_NO_LAIK
 // Laik context
 extern Laik_Instance *hpcg_instance;
 extern Laik_Group *world;
+#endif
 /*
     Important global variables -END
 */

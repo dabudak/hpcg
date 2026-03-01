@@ -21,7 +21,9 @@
 #ifndef CGDATA_HPP
 #define CGDATA_HPP
 
+#ifndef HPCG_NO_LAIK
 #include "laik/hpcg_laik.hpp"
+#endif
 #include "SparseMatrix.hpp"
 #include "Vector.hpp"
 

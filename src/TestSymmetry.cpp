@@ -21,6 +21,8 @@
 // The MPI include must be first for Windows platforms
 #ifndef HPCG_NO_MPI
 #include <mpi.h>
+#endif
+#ifndef HPCG_NO_LAIK
 #include "laik/hpcg_laik.hpp"
 #endif
 #include <fstream>
@@ -39,7 +41,7 @@ using std::endl;
 #include "SparseMatrix.hpp"
 #include "TestSymmetry.hpp"
 
-#ifndef HPCG_NO_MPI
+#ifndef HPCG_NO_LAIK
 int TestSymmetry_laik(SparseMatrix &A, Laik_Blob *b, Laik_Blob *xexact, TestSymmetryData &testsymmetry_data)
 {
 

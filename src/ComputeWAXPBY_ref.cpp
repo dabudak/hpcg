@@ -19,12 +19,15 @@
  */
 
 #include "ComputeWAXPBY_ref.hpp"
+#ifndef HPCG_NO_LAIK
 #include "laik/hpcg_laik.hpp"
+#endif
 #ifndef HPCG_NO_OPENMP
 #include <omp.h>
 #endif
 #include <cassert>
 
+#ifndef HPCG_NO_LAIK
 int ComputeWAXPBY_laik_ref(const local_int_t n, const double alpha, const Laik_Blob *x,
                       const double beta, const Laik_Blob *y, const Laik_Blob *w)
 {
@@ -67,6 +70,7 @@ int ComputeWAXPBY_laik_ref(const local_int_t n, const double alpha, const Laik_B
 
   return 0;
 }
+#endif
 
 int ComputeWAXPBY_ref(const local_int_t n, const double alpha, const Vector &x,
                       const double beta, const Vector &y, Vector &w)

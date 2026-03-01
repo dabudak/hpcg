@@ -40,9 +40,10 @@ using std::endl;
 
 #include "GenerateProblem_ref.hpp"
 #include "SetupHalo.hpp"
+#ifndef HPCG_NO_LAIK
 #include "laik/laik_x_vector.hpp"
-#include <laik.h>
 #include <laik/data.h>
+#endif
 
 
 /*!
@@ -433,9 +434,9 @@ void GenerateProblem_ref(SparseMatrix & A, Vector * b, Vector * x, Vector * xexa
     }
 
     if (laik_size(A.world) > 1) {
-      laik_switchto_partitioning(A.rowD, A.rowP, LAIK_DF_Preserve, LAIK_RO_None);
-      laik_switchto_partitioning(A.valD, A.rowsP, LAIK_DF_Preserve, LAIK_RO_None);
-      laik_switchto_partitioning(A.colD, A.rowsP, LAIK_DF_Preserve, LAIK_RO_None);
+      laik_switchto_partitioning(A.rowD, A.rowP, LAIK_DF_Preserve, LAIK_RO_Single);
+      laik_switchto_partitioning(A.valD, A.rowsP, LAIK_DF_Preserve, LAIK_RO_Single);
+      laik_switchto_partitioning(A.colD, A.rowsP, LAIK_DF_Preserve, LAIK_RO_Single);
     }
   }
 #endif // HPCG_NO_LAIK

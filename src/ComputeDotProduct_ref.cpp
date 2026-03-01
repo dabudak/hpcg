@@ -20,8 +20,10 @@
 
 #ifndef HPCG_NO_MPI
 #include "mpi.h"
-#include "laik/hpcg_laik.hpp"
 #include "mytimer.hpp"
+#endif
+#ifndef HPCG_NO_LAIK
+#include "laik/hpcg_laik.hpp"
 #endif
 #ifndef HPCG_NO_OPENMP
 #include <omp.h>
@@ -32,6 +34,7 @@
 
 #include "ComputeDotProduct_ref.hpp"
 
+#ifndef HPCG_NO_LAIK
 int ComputeDotProduct_laik_ref(const local_int_t n, const Laik_Blob *x, const Laik_Blob *y,
                           double &result, double &time_allreduce)
 {
@@ -102,6 +105,7 @@ int ComputeDotProduct_laik_ref(const local_int_t n, const Laik_Blob *x, const La
 
   return 0;
 }
+#endif
 
 int ComputeDotProduct_ref(const local_int_t n, const Vector &x, const Vector &y,
                           double &result, double &time_allreduce)

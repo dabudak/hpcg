@@ -19,6 +19,8 @@
  */
 #ifndef HPCG_NO_MPI
 #include <mpi.h>
+#endif
+#ifndef HPCG_NO_LAIK
 #include "laik/hpcg_laik.hpp"
 #endif
 #ifndef HPCG_NO_OPENMP
@@ -38,6 +40,7 @@
 #include <iostream>
 #endif
 
+#ifndef HPCG_NO_LAIK
 int ComputeResidual_laik(const local_int_t n, const Laik_Blob * v1, const Laik_Blob *v2, double &residual)
 {
 
@@ -88,6 +91,7 @@ int ComputeResidual_laik(const local_int_t n, const Laik_Blob * v1, const Laik_B
 
   return 0;
 }
+#endif
 
 int ComputeResidual(const local_int_t n, const Vector &v1, const Vector &v2, double &residual)
 {

@@ -258,9 +258,9 @@ inline void ReplaceMatrixDiagonal(SparseMatrix & A, Vector & diagonal) {
   if (A.valD && A.colD && A.rowD && A.rowsP && A.rowP)
     {
       // Keep LAIK CSR values consistent with updated diagonal.
-      laik_switchto_partitioning(A.rowD, A.rowP, LAIK_DF_Preserve, LAIK_RO_None);
-      laik_switchto_partitioning(A.valD, A.rowsP, LAIK_DF_Preserve, LAIK_RO_None);
-      laik_switchto_partitioning(A.colD, A.rowsP, LAIK_DF_Preserve, LAIK_RO_None);
+      laik_switchto_partitioning(A.rowD, A.rowP, LAIK_DF_Preserve, LAIK_RO_Single);
+      laik_switchto_partitioning(A.valD, A.rowsP, LAIK_DF_Preserve, LAIK_RO_Single);
+      laik_switchto_partitioning(A.colD, A.rowsP, LAIK_DF_Preserve, LAIK_RO_Single);
 
       int mapCount = laik_my_mapcount(A.rowsP);
       for (int mapNo = 0; mapNo < mapCount; ++mapNo)
