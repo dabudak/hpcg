@@ -30,6 +30,7 @@
 #include <iostream>
 using std::endl;
 #include <vector>
+#include <cmath>
 
 #include "laik/hpcg_laik.hpp"
 #include "hpcg.hpp"
@@ -74,6 +75,50 @@ int TestCG_laik(SparseMatrix &A, CGData &data, Laik_Blob *b, Laik_Blob *x, TestC
 
   ReplaceMatrixDiagonal(A, exaggeratedDiagA);
 
+  const char* diag_check = std::getenv("HPCG_LAIK_DIAG_CHECK");
+  if (diag_check && diag_check[0] != '\0' && A.rowD && A.valD && A.colD && A.matrixDiagonal_d && A.world)
+  {
+    if (laik_size(A.world) == 1) {
+      int64_t* rp = 0; uint64_t rp_len = 0;
+      int64_t* col = 0; uint64_t col_len = 0;
+      double* val = 0; uint64_t val_len = 0;
+      double* diag_d = 0; uint64_t diag_len = 0;
+      laik_get_map_1d(A.rowD, 0, (void**)&rp, &rp_len);
+      laik_get_map_1d(A.colD, 0, (void**)&col, &col_len);
+      laik_get_map_1d(A.valD, 0, (void**)&val, &val_len);
+      laik_get_map_1d(A.matrixDiagonal_d, 0, (void**)&diag_d, &diag_len);
+
+      local_int_t rows = A.localNumberOfRows;
+      local_int_t sample = rows < 10 ? rows : 10;
+      int missing = 0;
+      double max_diff = 0.0;
+      for (local_int_t i = 0; i < sample; ++i) {
+        global_int_t g = A.localToGlobalMap[i];
+        int64_t beg = rp[g];
+        int64_t end = rp[g + 1];
+        double csr_diag = 0.0;
+        bool found = false;
+        for (int64_t o = beg; o < end; ++o) {
+          if (col[o] == g) {
+            csr_diag = val[o];
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          missing++;
+          continue;
+        }
+        double diff = std::abs(csr_diag - diag_d[i]);
+        if (diff > max_diff) max_diff = diff;
+      }
+      if (A.geom->rank == 0) {
+        std::cout << "Diag check: sample=" << sample << " missing=" << missing
+                  << " max diff=" << max_diff << std::endl;
+      }
+    }
+  }
+
   int niters = 0;
   double normr = 0.0;
   double normr0 = 0.0;
@@ -96,6 +141,16 @@ int TestCG_laik(SparseMatrix &A, CGData &data, Laik_Blob *b, Laik_Blob *x, TestC
       if (ierr)
         HPCG_fout << "Error in call to CG: " << ierr << ".\n"
                   << endl;
+      const char* cg_dbg = std::getenv("HPCG_LAIK_CG_DEBUG");
+      if (cg_dbg && cg_dbg[0] != '\0' && A.geom->rank == 0) {
+        double scaled = (normr0 != 0.0) ? (normr / normr0) : -1.0;
+        std::cout << "TestCG " << (k == 1 ? "prec" : "noprec")
+                  << " call " << i
+                  << " niters=" << niters
+                  << " scaled=" << scaled
+                  << (std::isfinite(scaled) ? "" : " (non-finite)")
+                  << std::endl;
+      }
       if (niters <= expected_niters)
       {
         ++testcg_data.count_pass;

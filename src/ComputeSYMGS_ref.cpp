@@ -26,6 +26,7 @@
 #include <cassert>
 #include <iostream>
 #include <cstdlib>
+#include <cmath>
 #include "ComputeSYMGS_ref.hpp"
 
 int ComputeSYMGS_laik_ref(const SparseMatrix &A, const Laik_Blob *r, Laik_Blob *x)
@@ -37,6 +38,9 @@ int ComputeSYMGS_laik_ref(const SparseMatrix &A, const Laik_Blob *r, Laik_Blob *
 
   const local_int_t nrow = A.localNumberOfRows;
   double **matrixDiagonal = A.matrixDiagonal; // An array of pointers to the diagonal entries A.matrixValues
+  double *matrixDiagonal_d = 0;
+  if (A.matrixDiagonal_d)
+    laik_get_map_1d(A.matrixDiagonal_d, 0, (void **)&matrixDiagonal_d, 0);
 
   const double * rv;
   double * xv;
@@ -44,12 +48,28 @@ int ComputeSYMGS_laik_ref(const SparseMatrix &A, const Laik_Blob *r, Laik_Blob *
   laik_get_map_1d(x->values, 0, (void **)&xv, 0);
   laik_get_map_1d(r->values, 0, (void **)&rv, 0);
 
+  const char* nan_check = std::getenv("HPCG_LAIK_NAN_CHECK");
+  if (nan_check && nan_check[0] != '\0') {
+    for (local_int_t i = 0; i < nrow; ++i) {
+      if (!std::isfinite(rv[i])) {
+        std::fprintf(stderr, "[rank %d] SYMGS r non-finite at %d: %g\n",
+                     A.geom ? A.geom->rank : -1, (int)i, rv[i]);
+        break;
+      }
+      if (!std::isfinite(xv[i])) {
+        std::fprintf(stderr, "[rank %d] SYMGS x non-finite at %d: %g\n",
+                     A.geom ? A.geom->rank : -1, (int)i, xv[i]);
+        break;
+      }
+    }
+  }
+
   for (local_int_t i = 0; i < nrow; i++)
   {
     const double *const currentValues = A.matrixValues[i];
     const local_int_t *const currentColIndices = A.mtxIndL[i];
     const int currentNumberOfNonzeros = A.nonzerosInRow[i];
-    const double currentDiagonal = matrixDiagonal[i][0]; // Current diagonal value
+    const double currentDiagonal = matrixDiagonal_d ? matrixDiagonal_d[i] : matrixDiagonal[i][0]; // Current diagonal value
     double sum = rv[i];        // RHS value
 
     for (int j = 0; j < currentNumberOfNonzeros; j++)
@@ -63,6 +83,16 @@ int ComputeSYMGS_laik_ref(const SparseMatrix &A, const Laik_Blob *r, Laik_Blob *
     xv[i] = sum / currentDiagonal;
   }
 
+  if (nan_check && nan_check[0] != '\0') {
+    for (local_int_t i = 0; i < nrow; ++i) {
+      if (!std::isfinite(xv[i])) {
+        std::fprintf(stderr, "[rank %d] SYMGS forward non-finite at %d: %g\n",
+                     A.geom ? A.geom->rank : -1, (int)i, xv[i]);
+        break;
+      }
+    }
+  }
+
   // Now the back sweep.
 
   for (local_int_t i = nrow - 1; i >= 0; i--)
@@ -70,7 +100,7 @@ int ComputeSYMGS_laik_ref(const SparseMatrix &A, const Laik_Blob *r, Laik_Blob *
     const double *const currentValues = A.matrixValues[i];
     const local_int_t *const currentColIndices = A.mtxIndL[i];
     const int currentNumberOfNonzeros = A.nonzerosInRow[i];
-    const double currentDiagonal = matrixDiagonal[i][0]; // Current diagonal value
+    const double currentDiagonal = matrixDiagonal_d ? matrixDiagonal_d[i] : matrixDiagonal[i][0]; // Current diagonal value
     double sum = rv[i];       // RHS value
 
     for (int j = 0; j < currentNumberOfNonzeros; j++)
@@ -83,7 +113,18 @@ int ComputeSYMGS_laik_ref(const SparseMatrix &A, const Laik_Blob *r, Laik_Blob *
     xv[i] = sum / currentDiagonal;
   }
 
-  laik_switchto_partitioning(x->values, A.local, LAIK_DF_None, LAIK_RO_None);
+  if (nan_check && nan_check[0] != '\0') {
+    for (local_int_t i = 0; i < nrow; ++i) {
+      if (!std::isfinite(xv[i])) {
+        std::fprintf(stderr, "[rank %d] SYMGS backward non-finite at %d: %g\n",
+                     A.geom ? A.geom->rank : -1, (int)i, xv[i]);
+        break;
+      }
+    }
+  }
+
+  // Preserve updated x when switching back to local partitioning.
+  laik_switchto_partitioning(x->values, A.local, LAIK_DF_Preserve, LAIK_RO_None);
 
   return 0;
 }

@@ -20,6 +20,7 @@
 
 #include <cassert>
 #include <iostream>
+#include <cmath>
 
 #include "laik/hpcg_laik.hpp"
 #include "ComputeMG_ref.hpp"
@@ -36,11 +37,25 @@ int ComputeMG_laik_ref(const SparseMatrix &A, const Laik_Blob * r, Laik_Blob * x
 
   ZeroLaikVector(x); // initialize x to zero
 
+  const char* nan_check = std::getenv("HPCG_LAIK_NAN_CHECK");
+
   int ierr = 0;
   if (A.mgData != 0)
   { // Go to next coarse level if defined
     int numberOfPresmootherSteps = A.mgData->numberOfPresmootherSteps;
     for (int i = 0; i < numberOfPresmootherSteps; ++i) ierr += ComputeSYMGS_laik_ref(A, r, x);
+
+    if (nan_check && nan_check[0] != '\0') {
+      double* xv = 0;
+      laik_get_map_1d(x->values, 0, (void**)&xv, 0);
+      for (local_int_t i = 0; i < A.localNumberOfRows; ++i) {
+        if (!std::isfinite(xv[i])) {
+          std::fprintf(stderr, "[rank %d] MG presmooth non-finite at %d: %g\n",
+                       A.geom ? A.geom->rank : -1, (int)i, xv[i]);
+          break;
+        }
+      }
+    }
 
     if (ierr != 0)
       return ierr;
@@ -64,12 +79,36 @@ int ComputeMG_laik_ref(const SparseMatrix &A, const Laik_Blob * r, Laik_Blob * x
       ierr += ComputeSYMGS_laik_ref(A, r, x);
     if (ierr != 0)
       return ierr;
+
+    if (nan_check && nan_check[0] != '\0') {
+      double* xv = 0;
+      laik_get_map_1d(x->values, 0, (void**)&xv, 0);
+      for (local_int_t i = 0; i < A.localNumberOfRows; ++i) {
+        if (!std::isfinite(xv[i])) {
+          std::fprintf(stderr, "[rank %d] MG postsmooth non-finite at %d: %g\n",
+                       A.geom ? A.geom->rank : -1, (int)i, xv[i]);
+          break;
+        }
+      }
+    }
   }
   else
   {
     ierr = ComputeSYMGS_laik_ref(A, r, x);
     if (ierr != 0)
       return ierr;
+
+    if (nan_check && nan_check[0] != '\0') {
+      double* xv = 0;
+      laik_get_map_1d(x->values, 0, (void**)&xv, 0);
+      for (local_int_t i = 0; i < A.localNumberOfRows; ++i) {
+        if (!std::isfinite(xv[i])) {
+          std::fprintf(stderr, "[rank %d] MG leaf non-finite at %d: %g\n",
+                       A.geom ? A.geom->rank : -1, (int)i, xv[i]);
+          break;
+        }
+      }
+    }
   }
   return 0;
 }

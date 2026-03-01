@@ -106,6 +106,7 @@ using GlobalToLocalMap = std::unordered_map< global_int_t, local_int_t >;
   Laik_Data *rowD;
   Laik_Data *valD;
   Laik_Data *colD;
+  Laik_Data *matrixDiagonal_d;
   Laik_Blob *x_blob;
   Laik_Blob *b_blob;
 
@@ -128,7 +129,6 @@ using GlobalToLocalMap = std::unordered_map< global_int_t, local_int_t >;
       Laik_Data *nonzerosInRow_d;  //!< The number of nonzeros in a row will always be 27 or fewer
       Laik_Data *mtxIndG_d;        //!< matrix indices as global values
       Laik_Data *matrixValues_d;   //!< values of matrix entries
-      Laik_Data *matrixDiagonal_d; //!< values of matrix diagonal entries
 
       /*
         This variable is only for x_l
@@ -190,6 +190,7 @@ inline void InitializeSparseMatrix(SparseMatrix & A, Geometry * geom) {
   A.rowD = 0;
   A.valD = 0;
   A.colD = 0;
+  A.matrixDiagonal_d = 0;
   A.x_blob = 0;
   A.b_blob = 0;
 
@@ -204,7 +205,6 @@ inline void InitializeSparseMatrix(SparseMatrix & A, Geometry * geom) {
       A.nonzerosInRow_d = 0;
       A.mtxIndG_d = 0;
       A.matrixValues_d = 0;
-      A.matrixDiagonal_d = 0;
       A.ptr_to_xexact = 0;
     #endif // REPARTITION
   #endif // HPCG_NO_LAIK
@@ -217,14 +217,14 @@ inline void InitializeSparseMatrix(SparseMatrix & A, Geometry * geom) {
 inline void CopyMatrixDiagonal(SparseMatrix & A, Vector & diagonal) {
 
 #ifndef HPCG_NO_LAIK
-#ifdef REPARTITION
+  if (A.matrixDiagonal_d) {
     double *matrixDiagonal;
     laik_get_map_1d(A.matrixDiagonal_d, 0, (void **)&matrixDiagonal, 0);
     double *dia_v = diagonal.values;
     assert(A.localNumberOfRows == diagonal.localLength);
     for (local_int_t i=0; i<A.localNumberOfRows; ++i) dia_v[i] = matrixDiagonal[i];
-  return;
-#endif
+    return;
+  }
 #endif
 
     double ** curDiagA = A.matrixDiagonal;
@@ -237,23 +237,82 @@ inline void CopyMatrixDiagonal(SparseMatrix & A, Vector & diagonal) {
 inline void ReplaceMatrixDiagonal(SparseMatrix & A, Vector & diagonal) {
 
 #ifndef HPCG_NO_LAIK
-#ifdef REPARTITION
+  if (A.matrixDiagonal_d) {
     double *matrixDiagonal;
     laik_get_map_1d(A.matrixDiagonal_d, 0, (void **)&matrixDiagonal, 0);
     double *dia_v = diagonal.values;
     assert(A.localNumberOfRows == diagonal.localLength);
     for (local_int_t i=0; i<A.localNumberOfRows; ++i) matrixDiagonal[i] = dia_v[i];
-
+#ifdef REPARTITION
     replaceMatrixValues(A);
-
-    return;
 #endif
+  }
 #endif
 
     double ** curDiagA = A.matrixDiagonal;
     double * dv = diagonal.values;
     assert(A.localNumberOfRows==diagonal.localLength);
     for (local_int_t i=0; i<A.localNumberOfRows; ++i) *(curDiagA[i]) = dv[i];
+
+#ifndef HPCG_NO_LAIK
+  if (A.valD && A.colD && A.rowD && A.rowsP && A.rowP)
+    {
+      // Keep LAIK CSR values consistent with updated diagonal.
+      laik_switchto_partitioning(A.rowD, A.rowP, LAIK_DF_Preserve, LAIK_RO_None);
+      laik_switchto_partitioning(A.valD, A.rowsP, LAIK_DF_Preserve, LAIK_RO_None);
+      laik_switchto_partitioning(A.colD, A.rowsP, LAIK_DF_Preserve, LAIK_RO_None);
+
+      int mapCount = laik_my_mapcount(A.rowsP);
+      for (int mapNo = 0; mapNo < mapCount; ++mapNo)
+      {
+        double *val = 0; uint64_t val_len = 0;
+        int64_t *col = 0; uint64_t col_len = 0;
+        laik_get_map_1d(A.valD, mapNo, (void **)&val, &val_len);
+        laik_get_map_1d(A.colD, mapNo, (void **)&col, &col_len);
+
+        int mrCount = laik_my_maprangecount(A.rowsP, mapNo);
+        int64_t range_val_offset = 0;
+        for (int mr = 0; mr < mrCount; ++mr)
+        {
+          Laik_TaskRange *tr = laik_my_maprange(A.rowsP, mapNo, mr);
+          const Laik_Range *s = laik_taskrange_get_range(tr);
+          int64_t rf = s->from.i[0];
+          int64_t rt = s->to.i[0];
+          int64_t rowsHere = rt - rf;
+
+          int row_map_no = -1;
+          uint64_t row_lfrom_u = 0;
+          Laik_Mapping *row_map = laik_global2maplocal_1d(A.rowD, rf, &row_map_no, &row_lfrom_u);
+          if (!row_map) continue;
+
+          int64_t *rp_base = 0; uint64_t rp_len = 0;
+          laik_get_map_1d(A.rowD, row_map_no, (void **)&rp_base, &rp_len);
+          int64_t *row_ptr = rp_base;
+          int64_t base = row_ptr[0] - range_val_offset;
+
+          for (int64_t i = 0; i < rowsHere; ++i)
+          {
+            global_int_t grow = rf + i;
+            auto it = A.globalToLocalMap.find(grow);
+            if (it == A.globalToLocalMap.end()) continue;
+            double new_diag = dv[it->second];
+
+            int64_t beg = row_ptr[i] - base;
+            int64_t end = row_ptr[i + 1] - base;
+            for (int64_t o = beg; o < end; ++o)
+            {
+              if (col[o] == grow)
+              {
+                val[o] = new_diag;
+                break;
+              }
+            }
+          }
+          range_val_offset += (row_ptr[rowsHere] - row_ptr[0]);
+        }
+      }
+    }
+#endif
   return;
 }
 

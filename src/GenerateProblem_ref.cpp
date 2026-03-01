@@ -281,6 +281,28 @@ void GenerateProblem_ref(SparseMatrix & A, Vector * b, Vector * x, Vector * xexa
 
     if (!A.x_blob) A.x_blob = init_blob(A, true, "x", A.local, A.ext);
 
+    if (!A.matrixDiagonal_d) {
+      A.matrixDiagonal_d = laik_new_data(A.space, laik_Double);
+      Laik_Data_Parameters* dparams = (Laik_Data_Parameters*)malloc(sizeof(*dparams));
+      dparams->prefix_row_data = 0;
+      dparams->vector_local_indices = reinterpret_cast<const int64_t*>(A.localToGlobalMap.data());
+      dparams->vector_local_count = (uint64_t)A.localNumberOfRows;
+      dparams->vector_external_indices = 0;
+      dparams->vector_external_count = 0;
+      laik_data_attach_params(A.matrixDiagonal_d, dparams);
+      laik_data_set_layout_factory(A.matrixDiagonal_d, laik_new_layout_vector);
+      laik_switchto_partitioning(A.matrixDiagonal_d, A.local, LAIK_DF_None, LAIK_RO_None);
+    }
+
+    // Mirror diagonal into LAIK data for SYMGS/validation paths.
+    double* diag_d = 0; uint64_t diag_len = 0;
+    laik_get_map_1d(A.matrixDiagonal_d, 0, (void**)&diag_d, &diag_len);
+    if (diag_d) {
+      for (local_int_t i = 0; i < A.localNumberOfRows; ++i) {
+        diag_d[i] = A.matrixDiagonal[i][0];
+      }
+    }
+
     if (!A.rowSpacePrefix)
       A.rowSpacePrefix = laik_new_space_1d(A.inst, A.totalNumberOfRows + 1);
 

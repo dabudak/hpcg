@@ -33,6 +33,7 @@
 #include <iostream>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
 #ifdef HPCG_DETAILED_DEBUG
 using std::cin;
 #endif
@@ -65,6 +66,100 @@ using std::endl;
 #include "TestCG.hpp"
 #include "TestSymmetry.hpp"
 #include "TestNorms.hpp"
+
+#ifndef HPCG_NO_LAIK
+static void SpmvCheckLaik(const SparseMatrix &A, const char *label)
+{
+  const char *spmv_check = std::getenv("HPCG_LAIK_SPMV_CHECK");
+  if (!spmv_check || spmv_check[0] == '\0')
+    return;
+
+  if (A.numberOfExternalValues != 0)
+  {
+    if (A.geom && A.geom->rank == 0)
+      std::cout << "SpMV check skipped (external values present) for " << label << std::endl;
+    return;
+  }
+
+  Laik_Blob *x_check = init_blob(A, true, "spmv_x");
+  Laik_Blob *b_check = init_blob(A, false, "spmv_b");
+
+  double *xv = 0;
+  uint64_t xcount = 0;
+  laik_get_map_1d(x_check->values, 0, (void **)&xv, &xcount);
+  for (uint64_t i = 0; i < x_check->localLength; ++i)
+    xv[i] = (double)(i + 1);
+
+  ComputeSPMV_laik_ref(A, x_check, b_check);
+
+  double *bv = 0;
+  laik_get_map_1d(b_check->values, 0, (void **)&bv, 0);
+  laik_get_map_1d(x_check->values, 0, (void **)&xv, &xcount);
+
+  Vector x_ref, y_ref;
+  InitializeVector(x_ref, A.localNumberOfRows);
+  InitializeVector(y_ref, A.localNumberOfRows);
+  for (uint64_t i = 0; i < x_ref.localLength; ++i)
+    x_ref.values[i] = xv[i];
+
+  for (local_int_t i = 0; i < A.localNumberOfRows; ++i)
+  {
+    double sum = 0.0;
+    const double *const cur_vals = A.matrixValues[i];
+    const local_int_t *const cur_inds = A.mtxIndL[i];
+    const int cur_nnz = A.nonzerosInRow[i];
+    for (int j = 0; j < cur_nnz; ++j)
+      sum += cur_vals[j] * x_ref.values[cur_inds[j]];
+    y_ref.values[i] = sum;
+  }
+
+  double max_diff = 0.0;
+  double sum_diff = 0.0;
+  const char *spmv_diff = std::getenv("HPCG_LAIK_SPMV_DIFF");
+  int printed = 0;
+  for (local_int_t i = 0; i < A.localNumberOfRows; ++i)
+  {
+    double diff = std::fabs(y_ref.values[i] - bv[i]);
+    if (diff > max_diff)
+      max_diff = diff;
+    sum_diff += diff;
+    if (spmv_diff && spmv_diff[0] != '\0' && diff != 0.0 && printed < 5)
+    {
+      std::cout << "SpMV diff row " << i
+                << " y_ref=" << y_ref.values[i]
+                << " y_csr=" << bv[i]
+                << " diff=" << diff << std::endl;
+      if (printed == 0)
+      {
+        const int cur_nnz = A.nonzerosInRow[i];
+        const local_int_t *const cur_inds = A.mtxIndL[i];
+        const double *const cur_vals = A.matrixValues[i];
+        std::cout << "Row " << i << " nnz=" << cur_nnz << " entries:";
+        for (int j = 0; j < cur_nnz; ++j)
+        {
+          local_int_t idx = cur_inds[j];
+          double xval = (idx >= 0 && idx < x_ref.localLength) ? x_ref.values[idx] : 0.0;
+          std::cout << " (" << idx << "," << cur_vals[j] << ",x=" << xval << ")";
+        }
+        std::cout << std::endl;
+      }
+      printed++;
+    }
+  }
+
+  double gmax = 0.0;
+  double gsum = 0.0;
+  laik_allreduce(&max_diff, &gmax, 1, laik_Double, LAIK_RO_Max);
+  laik_allreduce(&sum_diff, &gsum, 1, laik_Double, LAIK_RO_Sum);
+  if (A.geom && A.geom->rank == 0)
+    std::cout << "SpMV check (" << label << "): max diff=" << gmax << " sum diff=" << gsum << std::endl;
+
+  DeleteVector(x_ref);
+  DeleteVector(y_ref);
+  DeleteLaikVector(x_check);
+  DeleteLaikVector(b_check);
+}
+#endif
 
 int main(int argc, char *argv[])
 {
@@ -162,7 +257,10 @@ int main(int argc, char *argv[])
 
   Vector b, x, xexact;
   GenerateProblem(A, &b, &x, &xexact);
+#ifdef HPCG_NO_LAIK
+  // GenerateProblem_ref already calls SetupHalo; avoid reinitializing in LAIK builds.
   SetupHalo(A);
+#endif
 
 #ifndef HPCG_NO_LAIK
   std::string name{""};
@@ -220,6 +318,8 @@ int main(int argc, char *argv[])
       std::cout << "Diff (SpMV - b): " << (sum - bsum) << std::endl;
     }
 
+    SpmvCheckLaik(A, "fine");
+
     DeleteLaikVector(x_check);
     DeleteLaikVector(b_check);
     // --- End LAIK SpMV correctness check ---
@@ -237,6 +337,15 @@ int main(int argc, char *argv[])
   {
     GenerateCoarseProblem(*curLevelMatrix);
     curLevelMatrix = curLevelMatrix->Ac; // Make the just-constructed coarse grid the next level
+  }
+
+  if (iter == 0) {
+    SparseMatrix *checkLevel = A.Ac;
+    for (int level = 1; level < numberOfMgLevels && checkLevel; ++level) {
+      std::string label = std::string("coarseL") + std::to_string(level);
+      SpmvCheckLaik(*checkLevel, label.c_str());
+      checkLevel = checkLevel->Ac;
+    }
   }
 
   setup_time = mytimer() - setup_time; // Capture total time of setup
