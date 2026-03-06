@@ -105,6 +105,22 @@ Laik_Blob* init_blob(const SparseMatrix& A, bool exchangesValues, const char* na
   blob->localLength = A.localNumberOfRows;
   blob->exchangesValues = exchangesValues;
   blob->name = name;
+  blob->base = 0;
+  blob->base_ext = 0;
+  blob->localCount = (uint64_t)A.localNumberOfRows;
+  blob->extCount = exchangesValues ? ((uint64_t)A.localNumberOfRows + (uint64_t)A.numberOfExternalValues)
+                                   : (uint64_t)A.localNumberOfRows;
+  blob->reservation = 0;
+  blob->toExtTransition = 0;
+  blob->toLocalTransition = 0;
+  blob->toExtActions = 0;
+  blob->toLocalActions = 0;
+  blob->localP = localP;
+  blob->extP = extP;
+  blob->toExtFromP = 0;
+  blob->toExtToP = 0;
+  blob->toLocalFromP = 0;
+  blob->toLocalToP = 0;
   laik_data_set_name(blob->values, const_cast<char*>(name));
 
   // Vector layout with stable external mapping
@@ -117,11 +133,51 @@ Laik_Blob* init_blob(const SparseMatrix& A, bool exchangesValues, const char* na
   laik_data_attach_params(blob->values, params);
   laik_data_set_layout_factory(blob->values, laik_new_layout_vector);
 
+  if (localP || extP) {
+    blob->reservation = laik_reservation_new(blob->values);
+    if (localP) laik_reservation_add(blob->reservation, localP);
+    if (exchangesValues && extP && extP != localP) laik_reservation_add(blob->reservation, extP);
+    laik_reservation_alloc(blob->reservation);
+    laik_data_use_reservation(blob->values, blob->reservation);
+  }
+
   // Initialize with external partitioning to pre-allocate, then switch to local
-  if (exchangesValues && extP)
+  if (exchangesValues && extP) {
     laik_switchto_partitioning(blob->values, extP, LAIK_DF_None, LAIK_RO_None);
-  if (localP)
+    uint64_t count = 0;
+    laik_get_map_1d(blob->values, 0, (void**)&blob->base_ext, &count);
+    blob->extP = laik_data_get_partitioning(blob->values);
+  }
+  if (localP) {
     laik_switchto_partitioning(blob->values, localP, LAIK_DF_None, LAIK_RO_None);
+    uint64_t count = 0;
+    laik_get_map_1d(blob->values, 0, (void**)&blob->base, &count);
+    blob->localP = laik_data_get_partitioning(blob->values);
+  }
+
+  if (blob->localP) {
+    if (exchangesValues && blob->extP && blob->extP != blob->localP) {
+      blob->toExtTransition = laik_calc_transition(A.space, blob->localP, blob->extP,
+                                                   LAIK_DF_Preserve, LAIK_RO_Single);
+      blob->toLocalTransition = laik_calc_transition(A.space, blob->extP, blob->localP,
+                                                     LAIK_DF_Preserve, LAIK_RO_Single);
+      blob->toExtActions = laik_calc_actions(blob->values, blob->toExtTransition,
+                                             blob->reservation, blob->reservation);
+      blob->toLocalActions = laik_calc_actions(blob->values, blob->toLocalTransition,
+                                               blob->reservation, blob->reservation);
+      blob->toExtFromP = blob->localP;
+      blob->toExtToP = blob->extP;
+      blob->toLocalFromP = blob->extP;
+      blob->toLocalToP = blob->localP;
+    } else {
+      blob->toLocalTransition = laik_calc_transition(A.space, blob->localP, blob->localP,
+                                                     LAIK_DF_Preserve, LAIK_RO_Single);
+      blob->toLocalActions = laik_calc_actions(blob->values, blob->toLocalTransition,
+                                               blob->reservation, blob->reservation);
+      blob->toLocalFromP = blob->localP;
+      blob->toLocalToP = blob->localP;
+    }
+  }
 
   return blob;
 }
@@ -303,6 +359,90 @@ void CopyLaikVectorToVector(Laik_Blob* x, Vector& v)
 void DeleteLaikVector(Laik_Blob* x)
 {
   x->localLength = 0;
+  x->base = 0;
+  x->base_ext = 0;
+  x->localCount = 0;
+  x->extCount = 0;
+  if (x->toExtActions) {
+    laik_aseq_free(x->toExtActions);
+    x->toExtActions = 0;
+  }
+  if (x->toLocalActions) {
+    laik_aseq_free(x->toLocalActions);
+    x->toLocalActions = 0;
+  }
+  if (x->toExtTransition) {
+    laik_free_transition(x->toExtTransition);
+    x->toExtTransition = 0;
+  }
+  if (x->toLocalTransition) {
+    laik_free_transition(x->toLocalTransition);
+    x->toLocalTransition = 0;
+  }
+  x->toExtFromP = 0;
+  x->toExtToP = 0;
+  x->toLocalFromP = 0;
+  x->toLocalToP = 0;
+  if (x->reservation) {
+    laik_reservation_free(x->reservation);
+    x->reservation = 0;
+  }
   laik_free(x->values);
   x->values = NULL;
+}
+
+void EnsureLaikActionsToExt(Laik_Blob* x)
+{
+  if (!x || !x->extP) return;
+
+  Laik_Partitioning* active = laik_data_get_partitioning(x->values);
+  if (!active) return;
+
+  if (x->toExtActions && x->toExtFromP == active && x->toExtToP == x->extP)
+    return;
+
+  if (x->toExtActions) {
+    laik_aseq_free(x->toExtActions);
+    x->toExtActions = 0;
+  }
+  if (x->toExtTransition) {
+    laik_free_transition(x->toExtTransition);
+    x->toExtTransition = 0;
+  }
+
+  Laik_Space* space = laik_data_get_space(x->values);
+  x->toExtTransition = laik_calc_transition(space, active, x->extP,
+                                            LAIK_DF_Preserve, LAIK_RO_Single);
+  x->toExtActions = laik_calc_actions(x->values, x->toExtTransition,
+                                      x->reservation, x->reservation);
+  x->toExtFromP = active;
+  x->toExtToP = x->extP;
+}
+
+void EnsureLaikActionsToLocal(Laik_Blob* x)
+{
+  if (!x || !x->localP) return;
+
+  Laik_Partitioning* active = laik_data_get_partitioning(x->values);
+  if (!active) return;
+
+  if (x->toLocalActions && x->toLocalFromP == active && x->toLocalToP == x->localP)
+    return;
+
+  if (x->toLocalActions) {
+    laik_aseq_free(x->toLocalActions);
+    x->toLocalActions = 0;
+  }
+  if (x->toLocalTransition) {
+    laik_free_transition(x->toLocalTransition);
+    x->toLocalTransition = 0;
+  }
+
+  Laik_Space* space = laik_data_get_space(x->values);
+  x->toLocalTransition = laik_calc_transition(space, active, x->localP,
+                                              LAIK_DF_Preserve, LAIK_RO_Single);
+  x->toLocalActions = laik_calc_actions(x->values, x->toLocalTransition,
+                                        x->reservation, x->reservation);
+  x->toLocalFromP = active;
+  x->toLocalToP = x->localP;
 }

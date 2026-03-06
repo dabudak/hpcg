@@ -31,6 +31,7 @@
 #include <cmath>
 #include <unordered_map>
 #include <vector>
+#include <cstring>
 #include "ComputeSYMGS_ref.hpp"
 
 #ifndef HPCG_NO_LAIK
@@ -39,7 +40,27 @@ int ComputeSYMGS_laik_ref(const SparseMatrix &A, const Laik_Blob *r, Laik_Blob *
 
   assert(x->localLength == A.localNumberOfRows);
 
-  laik_switchto_partitioning(x->values, A.ext, LAIK_DF_Preserve, LAIK_RO_Single);
+  {
+    assert(x->toExtActions);
+    Laik_Partitioning* x_active = laik_data_get_partitioning(x->values);
+    if (x_active == x->localP && x->extP) {
+      if (x->base && x->base_ext && x->base_ext != x->base) {
+        std::memcpy(x->base_ext, x->base, x->localCount * sizeof(double));
+      }
+      EnsureLaikActionsToExt(x);
+      laik_exec_actions(x->toExtActions);
+    } else {
+      std::fprintf(stderr,
+                   "[rank %d] SYMGS ext check: active=%p localP=%p extP=%p data=%s\n",
+                   A.geom ? A.geom->rank : -1,
+                   (void*)x_active,
+                   (void*)x->localP,
+                   (void*)x->extP,
+                   x->name ? x->name : "(null)");
+      std::fflush(stderr);
+      assert(x_active == x->extP || x->extP == 0);
+    }
+  }
 
   const local_int_t nrow = A.localNumberOfRows;
   double **matrixDiagonal = A.matrixDiagonal; // An array of pointers to the diagonal entries A.matrixValues
@@ -398,7 +419,19 @@ int ComputeSYMGS_laik_ref(const SparseMatrix &A, const Laik_Blob *r, Laik_Blob *
   }
 
   // Preserve updated x when switching back to local partitioning.
-  laik_switchto_partitioning(x->values, A.local, LAIK_DF_Preserve, LAIK_RO_Single);
+  {
+    assert(x->toLocalActions);
+    Laik_Partitioning* x_active = laik_data_get_partitioning(x->values);
+    if (x_active == x->extP && x->localP) {
+      EnsureLaikActionsToLocal(x);
+      laik_exec_actions(x->toLocalActions);
+      if (x->base && x->base_ext && x->base_ext != x->base) {
+        std::memcpy(x->base, x->base_ext, x->localCount * sizeof(double));
+      }
+    } else {
+      assert(x_active == x->localP || x->extP == 0);
+    }
+  }
 
   return 0;
 }

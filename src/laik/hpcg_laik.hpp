@@ -47,6 +47,7 @@ struct Laik_Data;
 struct Laik_Mapping;
 struct Laik_TaskRange;
 struct Laik_Range;
+struct Laik_Reservation;
 #endif
 /*
     Includes -END

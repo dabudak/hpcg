@@ -34,6 +34,7 @@
 #include <unordered_map>
 #include <vector>
 #include <cmath>
+#include <cstring>
 
 /*!
   Routine to compute matrix vector product y = Ax where:
@@ -61,10 +62,25 @@ int ComputeSPMV_laik_ref(const SparseMatrix &A, Laik_Blob *x, Laik_Blob *y) {
   }
 
   // Switch x to ext to make halo values available
-  laik_switchto_partitioning(x->values, A.ext, LAIK_DF_Preserve, LAIK_RO_Single);
+  {
+    assert(x->toExtActions);
+    Laik_Partitioning* x_active = laik_data_get_partitioning(x->values);
+    if (x_active == x->localP && x->extP) {
+      if (x->base && x->base_ext && x->base_ext != x->base) {
+        std::memcpy(x->base_ext, x->base, x->localCount * sizeof(double));
+      }
+      EnsureLaikActionsToExt(x);
+      laik_exec_actions(x->toExtActions);
+    } else {
+      assert(x_active == x->extP || x->extP == 0);
+    }
+  }
 
-  double* xv = 0; uint64_t xcount = 0;
-  laik_get_map_1d(x->values, 0, (void**)&xv, &xcount);
+  double* xv = x->base;
+  if (x->extP && laik_data_get_partitioning(x->values) == x->extP && x->base_ext)
+    xv = x->base_ext;
+  uint64_t xcount = x->exchangesValues ? x->extCount : x->localCount;
+  assert(xv);
   if (trace) {
     std::fprintf(stderr, "[rank %d] LAIK SpMV: xcount=%llu\n", A.geom ? A.geom->rank : -1,
                  (unsigned long long)xcount);
@@ -72,9 +88,20 @@ int ComputeSPMV_laik_ref(const SparseMatrix &A, Laik_Blob *x, Laik_Blob *y) {
   }
 
   // Ensure y is in local partitioning
-  laik_switchto_partitioning(y->values, A.local, LAIK_DF_Preserve, LAIK_RO_Single);
-  double* yv = 0; uint64_t ycount = 0;
-  laik_get_map_1d(y->values, 0, (void**)&yv, &ycount);
+  {
+    assert(y->toLocalActions);
+    Laik_Partitioning* y_active = laik_data_get_partitioning(y->values);
+    if (y_active == y->extP && y->localP) {
+      EnsureLaikActionsToLocal(y);
+      laik_exec_actions(y->toLocalActions);
+    } else {
+      assert(y_active == y->localP || y->extP == 0);
+    }
+  }
+  double* yv = y->base;
+  if (y->extP && laik_data_get_partitioning(y->values) == y->extP && y->base_ext)
+    yv = y->base_ext;
+  assert(yv);
 
   // Build external global -> local index map for fast lookup
   std::unordered_map<global_int_t, local_int_t> extMap;
@@ -155,7 +182,16 @@ int ComputeSPMV_laik_ref(const SparseMatrix &A, Laik_Blob *x, Laik_Blob *y) {
   }
 
   // Return x to local partitioning while preserving updated data
-  laik_switchto_partitioning(x->values, A.local, LAIK_DF_Preserve, LAIK_RO_Single);
+  {
+    assert(x->toLocalActions);
+    Laik_Partitioning* x_active = laik_data_get_partitioning(x->values);
+    if (x_active == x->extP && x->localP) {
+      EnsureLaikActionsToLocal(x);
+      laik_exec_actions(x->toLocalActions);
+    } else {
+      assert(x_active == x->localP || x->extP == 0);
+    }
+  }
 
   return 0;
 }
@@ -195,13 +231,24 @@ int ComputeSPMV_ref_laik(const SparseMatrix& A, std::vector<double>& y) {
     std::fflush(stderr);
   }
   // Switch x to ext to trigger halo exchange (kelekcibo-style)
-  laik_switchto_partitioning(A.x_blob->values, A.ext, LAIK_DF_Preserve, LAIK_RO_Single);
+  {
+    assert(A.x_blob->toExtActions);
+    Laik_Partitioning* x_active = laik_data_get_partitioning(A.x_blob->values);
+    if (x_active == A.x_blob->localP && A.x_blob->extP) {
+      laik_exec_actions(A.x_blob->toExtActions);
+    } else {
+      assert(x_active == A.x_blob->extP || A.x_blob->extP == 0);
+    }
+  }
   if (trace) {
     std::fprintf(stderr, "[rank %d] LAIK SpMV: switched, get x map\n", A.geom ? A.geom->rank : -1);
     std::fflush(stderr);
   }
-  double* xv = 0; uint64_t xcount = 0;
-  laik_get_map_1d(A.x_blob->values, 0, (void**)&xv, &xcount);
+  double* xv = A.x_blob->base;
+  if (A.x_blob->extP && laik_data_get_partitioning(A.x_blob->values) == A.x_blob->extP && A.x_blob->base_ext)
+    xv = A.x_blob->base_ext;
+  uint64_t xcount = A.x_blob->exchangesValues ? A.x_blob->extCount : A.x_blob->localCount;
+  assert(xv);
   if (trace) {
     std::fprintf(stderr, "[rank %d] LAIK SpMV: xcount=%llu\n", A.geom ? A.geom->rank : -1,
                  (unsigned long long)xcount);

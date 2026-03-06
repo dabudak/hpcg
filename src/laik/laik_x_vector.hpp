@@ -85,6 +85,21 @@ struct Laik_Blob
     Laik_Data *values;
     bool exchangesValues;
     mutable local_int_t localLength;
+    double *base;
+    double *base_ext;
+    uint64_t localCount;
+    uint64_t extCount;
+    Laik_Reservation *reservation;
+    Laik_Transition *toExtTransition;
+    Laik_Transition *toLocalTransition;
+    Laik_ActionSeq *toExtActions;
+    Laik_ActionSeq *toLocalActions;
+    Laik_Partitioning *localP;
+    Laik_Partitioning *extP;
+    Laik_Partitioning *toExtFromP;
+    Laik_Partitioning *toExtToP;
+    Laik_Partitioning *toLocalFromP;
+    Laik_Partitioning *toLocalToP;
 };
 
 /*
@@ -116,6 +131,8 @@ extern void CopyVectorToLaikVector(Vector &v, Laik_Blob *x);
 extern void CopyLaikVectorToVector(const Laik_Blob *x, Vector &v);
 extern void CopyLaikVectorToVector(Laik_Blob *x, Vector &v);
 extern void ScaleLaikVectorValue(Laik_Blob *v, local_int_t index, double value);
+extern void EnsureLaikActionsToExt(Laik_Blob *x);
+extern void EnsureLaikActionsToLocal(Laik_Blob *x);
 /*
     Operations on laik vectors -END
 */
