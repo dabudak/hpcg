@@ -106,6 +106,9 @@ using GlobalToLocalMap = std::unordered_map< global_int_t, local_int_t >;
   Laik_Data *rowD;
   Laik_Data *valD;
   Laik_Data *colD;
+  mutable bool colDIsLocal;
+  GlobalToLocalMap extLocalMap;
+  mutable bool extMapBuilt;
   Laik_Data *matrixDiagonal_d;
   Laik_Blob *x_blob;
   Laik_Blob *b_blob;
@@ -190,6 +193,9 @@ inline void InitializeSparseMatrix(SparseMatrix & A, Geometry * geom) {
   A.rowD = 0;
   A.valD = 0;
   A.colD = 0;
+  A.colDIsLocal = false;
+  A.extLocalMap.clear();
+  A.extMapBuilt = false;
   A.matrixDiagonal_d = 0;
   A.x_blob = 0;
   A.b_blob = 0;
@@ -296,12 +302,13 @@ inline void ReplaceMatrixDiagonal(SparseMatrix & A, Vector & diagonal) {
             auto it = A.globalToLocalMap.find(grow);
             if (it == A.globalToLocalMap.end()) continue;
             double new_diag = dv[it->second];
+            int64_t diag_col = (int64_t)grow;
 
             int64_t beg = row_ptr[i] - base;
             int64_t end = row_ptr[i + 1] - base;
             for (int64_t o = beg; o < end; ++o)
             {
-              if (col[o] == grow)
+              if (col[o] == diag_col)
               {
                 val[o] = new_diag;
                 break;

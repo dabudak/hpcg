@@ -36,7 +36,9 @@ using std::endl;
 #include "hpcg.hpp"
 #endif
 #include <cassert>
+#include <cstdio>
 #include <cstdlib>
+#include <limits>
 
 #include "GenerateProblem_ref.hpp"
 #include "SetupHalo.hpp"
@@ -44,6 +46,24 @@ using std::endl;
 #include "laik/laik_x_vector.hpp"
 #include <laik/data.h>
 #endif
+
+static global_int_t count_global_nnz_explicit(global_int_t gnx,
+                                              global_int_t gny,
+                                              global_int_t gnz)
+{
+  global_int_t total = 0;
+  for (global_int_t z = 0; z < gnz; ++z) {
+    int cz = 1 + (z > 0) + (z + 1 < gnz);
+    for (global_int_t y = 0; y < gny; ++y) {
+      int cy = 1 + (y > 0) + (y + 1 < gny);
+      for (global_int_t x = 0; x < gnx; ++x) {
+        int cx = 1 + (x > 0) + (x + 1 < gnx);
+        total += (global_int_t)cx * (global_int_t)cy * (global_int_t)cz;
+      }
+    }
+  }
+  return total;
+}
 
 
 /*!
@@ -58,7 +78,6 @@ using std::endl;
 */
 
 void GenerateProblem_ref(SparseMatrix & A, Vector * b, Vector * x, Vector * xexact) {
-
   // Make local copies of geometry information.  Use global_int_t since the RHS products in the calculations
   // below may result in global range values.
   global_int_t nx = A.geom->nx;
@@ -217,6 +236,14 @@ void GenerateProblem_ref(SparseMatrix & A, Vector * b, Vector * x, Vector * xexa
 #else
   totalNumberOfNonzeros = localNumberOfNonzeros;
 #endif
+
+  if (A.geom->rank == 0) {
+    global_int_t explicitTotalNonzeros = count_global_nnz_explicit(gnx, gny, gnz);
+    std::printf("GenerateProblem_ref: generated total nnz = %lld, explicit global nnz = %lld\n",
+                (long long) totalNumberOfNonzeros,
+                (long long) explicitTotalNonzeros);
+  }
+
   const char* gen_dbg = std::getenv("HPCG_LAIK_GEN_DEBUG");
   if (gen_dbg && gen_dbg[0] != '\0') {
     fprintf(stderr,
@@ -251,29 +278,13 @@ void GenerateProblem_ref(SparseMatrix & A, Vector * b, Vector * x, Vector * xexa
 
 #ifndef HPCG_NO_LAIK
   // LAIK CSR initialization for SpMV (based on old tcp2 fix)
-  const char* csr_dbg = std::getenv("HPCG_LAIK_CSR_DEBUG");
-  if (csr_dbg && csr_dbg[0] != '\0') {
-    fprintf(stderr,
-            "[rank %d] CSR debug: hpcg_instance=%p world=%p\n",
-            A.geom ? A.geom->rank : -1,
-            (void*)hpcg_instance,
-            (void*)world);
-    fflush(stderr);
-  }
-
   if (hpcg_instance && world) {
-    if (csr_dbg && csr_dbg[0] != '\0') {
-      fprintf(stderr,
-              "[rank %d] CSR setup start: totalRows=%lld\n",
-              laik_myid(world), (long long)A.totalNumberOfRows);
-      fflush(stderr);
-    }
     A.inst = hpcg_instance;
     A.world = world;
     if (!A.space)
       A.space = laik_new_space_1d(A.inst, A.totalNumberOfRows);
 
-    if (!A.local || !A.ext) {
+    {
       partition_d* local_pd = new partition_d();
       partition_d* ext_pd = new partition_d();
       init_partition_data(A, local_pd, ext_pd);
@@ -282,27 +293,7 @@ void GenerateProblem_ref(SparseMatrix & A, Vector * b, Vector * x, Vector * xexa
 
     if (!A.x_blob) A.x_blob = init_blob(A, true, "x", A.local, A.ext);
 
-    if (!A.matrixDiagonal_d) {
-      A.matrixDiagonal_d = laik_new_data(A.space, laik_Double);
-      Laik_Data_Parameters* dparams = (Laik_Data_Parameters*)malloc(sizeof(*dparams));
-      dparams->prefix_row_data = 0;
-      dparams->vector_local_indices = reinterpret_cast<const int64_t*>(A.localToGlobalMap.data());
-      dparams->vector_local_count = (uint64_t)A.localNumberOfRows;
-      dparams->vector_external_indices = 0;
-      dparams->vector_external_count = 0;
-      laik_data_attach_params(A.matrixDiagonal_d, dparams);
-      laik_data_set_layout_factory(A.matrixDiagonal_d, laik_new_layout_vector);
-      laik_switchto_partitioning(A.matrixDiagonal_d, A.local, LAIK_DF_None, LAIK_RO_None);
-    }
-
-    // Mirror diagonal into LAIK data for SYMGS/validation paths.
-    double* diag_d = 0; uint64_t diag_len = 0;
-    laik_get_map_1d(A.matrixDiagonal_d, 0, (void**)&diag_d, &diag_len);
-    if (diag_d) {
-      for (local_int_t i = 0; i < A.localNumberOfRows; ++i) {
-        diag_d[i] = A.matrixDiagonal[i][0];
-      }
-    }
+    // Use host diagonal values; skip LAIK diagonal data to avoid invalid mappings.
 
     if (!A.rowSpacePrefix)
       A.rowSpacePrefix = laik_new_space_1d(A.inst, A.totalNumberOfRows + 1);
@@ -329,6 +320,7 @@ void GenerateProblem_ref(SparseMatrix & A, Vector * b, Vector * x, Vector * xexa
     Laik_Partitioner* master_pr = laik_new_master_partitioner();
     Laik_Partitioning* row_master = laik_new_partitioning(master_pr, A.world, A.rowSpacePrefix, 0);
     Laik_Partitioning* rows_master = laik_new_partitioning(master_pr, A.world, A.space, 0);
+
 
     if (!A.rowP || !A.rowsP) {
       if (laik_size(A.world) == 1) {
@@ -375,29 +367,6 @@ void GenerateProblem_ref(SparseMatrix & A, Vector * b, Vector * x, Vector * xexa
       }
       rp[A.totalNumberOfRows] = off;
 
-      if (csr_dbg && csr_dbg[0] != '\0') {
-        fprintf(stderr,
-                "[rank %d] CSR prefix: totalRows=%lld nnz_total=%lld rp_last=%lld\n",
-                laik_myid(A.world),
-                (long long)A.totalNumberOfRows,
-                (long long)off,
-                (long long)rp[A.totalNumberOfRows]);
-        fflush(stderr);
-      }
-    }
-
-    if (csr_dbg && csr_dbg[0] != '\0') {
-      int64_t* rp = 0; uint64_t rp_len = 0;
-      laik_get_map_1d(A.rowD, 0, (void**)&rp, &rp_len);
-      if (rp && rp_len > 0) {
-        fprintf(stderr,
-                "[rank %d] CSR rowD map0: rp_len=%llu rp0=%lld rplast=%lld\n",
-                laik_myid(A.world),
-                (unsigned long long)rp_len,
-                (long long)rp[0],
-                (long long)rp[rp_len - 1]);
-        fflush(stderr);
-      }
     }
 
     laik_switchto_partitioning(A.valD, rows_master, LAIK_DF_None, LAIK_RO_None);
@@ -438,6 +407,9 @@ void GenerateProblem_ref(SparseMatrix & A, Vector * b, Vector * x, Vector * xexa
       laik_switchto_partitioning(A.valD, A.rowsP, LAIK_DF_Preserve, LAIK_RO_Single);
       laik_switchto_partitioning(A.colD, A.rowsP, LAIK_DF_Preserve, LAIK_RO_Single);
     }
+
+    A.colDIsLocal = false;
+
   }
 #endif // HPCG_NO_LAIK
 
