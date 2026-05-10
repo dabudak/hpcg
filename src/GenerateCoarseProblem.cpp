@@ -89,10 +89,7 @@ void GenerateCoarseProblem(const SparseMatrix & Af) {
   SparseMatrix *Ac = new SparseMatrix;
   InitializeSparseMatrix(*Ac, geomc);
   GenerateProblem(*Ac, 0, 0, 0);
-#ifdef Hint mapCount = laik_my_mapcount(A.rowsP);PCG_NO_LAIK
-  // GenerateProblem_ref already calls SetupHalo; avoid reinitializing in LAIK builds.
   SetupHalo(*Ac);
-#endif
 
   MGData *mgData = new MGData;
 

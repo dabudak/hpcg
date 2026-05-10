@@ -20,8 +20,6 @@
 
 #include <cmath>
 #include <cstdlib>
-#include <cstring>
-
 #ifndef HPCG_NO_LAIK
 #include "laik/hpcg_laik.hpp"
 #endif
@@ -39,26 +37,6 @@
 
 
 #ifndef HPCG_NO_LAIK
-static inline void ensure_local(Laik_Blob* blob)
-{
-  if (!blob || !blob->localP || !blob->values)
-    return;
-
-  Laik_Partitioning* active = laik_data_get_partitioning(blob->values);
-  if (active == blob->localP)
-    return;
-
-  if (active == blob->extP) {
-    EnsureLaikActionsToLocal(blob);
-    laik_exec_actions(blob->toLocalActions);
-    if (blob->base && blob->base_ext && blob->base_ext != blob->base) {
-      std::memcpy(blob->base, blob->base_ext, blob->localCount * sizeof(double));
-    }
-    return;
-  }
-
-  laik_switchto_partitioning(blob->values, blob->localP, LAIK_DF_Preserve, LAIK_RO_Single);
-}
 int CG_laik(SparseMatrix &A, CGData &data, Laik_Blob *b, Laik_Blob *x,
        const int max_iter, const double tolerance, int &niters, double &normr, double &normr0,
        double *times, bool doPreconditioning)
@@ -87,13 +65,8 @@ int CG_laik(SparseMatrix &A, CGData &data, Laik_Blob *b, Laik_Blob *x,
 #endif
   // copy x to p for sparse MV operation
   CopyLaikVectorToLaikVector(x, p);
-  ensure_local(p);
   TICK(); ComputeSPMV_laik(A, p, Ap); TOCK(t3); // Ap = A*p
-  ensure_local(b);
-  ensure_local(Ap);
-  ensure_local(r);
   TICK(); ComputeWAXPBY_laik(nrow, 1.0, b, -1.0, Ap, r, A.isWaxpbyOptimized); TOCK(t2); // r = b - Ax (x stored in p)
-  ensure_local(r);
   TICK(); ComputeDotProduct_laik(nrow, r, r, normr, t4, A.isDotProductOptimized); TOCK(t1);
   normr = sqrt(normr);
 #ifdef HPCG_DEBUG
@@ -112,16 +85,12 @@ int CG_laik(SparseMatrix &A, CGData &data, Laik_Blob *b, Laik_Blob *x,
       ComputeMG_laik(A, r, z); // Apply preconditioner
     else
       CopyLaikVectorToLaikVector(r, z); // copy r to z (no preconditioning)
-    ensure_local(z);
-    ensure_local(r);
     TOCK(t5);           // Preconditioner apply time
 
 
     if (k == 1)
     {
       TICK();
-      ensure_local(z);
-      ensure_local(p);
       ComputeWAXPBY_laik(nrow, 1.0, z, 0.0, z, p, A.isWaxpbyOptimized);
       TOCK(t2); // Copy Mr to p
 
@@ -140,8 +109,6 @@ int CG_laik(SparseMatrix &A, CGData &data, Laik_Blob *b, Laik_Blob *x,
       TOCK(t1); // rtz = r'*z
       beta = rtz / oldrtz;
       TICK();
-      ensure_local(z);
-      ensure_local(p);
       ComputeWAXPBY_laik(nrow, 1.0, z, beta, p, p, A.isWaxpbyOptimized);
       TOCK(t2); // p = beta*p + z
     }
@@ -149,10 +116,6 @@ int CG_laik(SparseMatrix &A, CGData &data, Laik_Blob *b, Laik_Blob *x,
     TICK();
     ComputeSPMV_laik(A, p, Ap);
     TOCK(t3); // Ap = A*p
-    ensure_local(p);
-    ensure_local(Ap);
-    ensure_local(x);
-    ensure_local(r);
     TICK();
     ComputeDotProduct_laik(nrow, p, Ap, pAp, t4, A.isDotProductOptimized);
     TOCK(t1); // alpha = p'*Ap

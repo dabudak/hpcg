@@ -396,11 +396,9 @@ int main(int argc, char *argv[])
   double opt_worst_time = 0.0;
 
   std::vector<double> opt_times(9, 0.0);
-  // Compute the residual reduction and residual count for the user ordering and optimized kernels.
+  // First determine how many iterations optimized CG needs to reach the reference residual.
   for (int i = 0; i < numberOfCalls; ++i)
   {
-    double last_cummulative_time = opt_times[0];
-
 #ifndef HPCG_NO_LAIK
     ZeroLaikVector(x_l); // start x at all zeros
     ierr = CG_laik(A, data, b_l, x_l, optMaxIters, refTolerance, niters, normr, normr0, &opt_times[0], true);
@@ -415,6 +413,25 @@ int main(int argc, char *argv[])
 
     // pick the largest number of iterations to guarantee convergence
     if (niters > optNiters) optNiters = niters;
+  }
+
+  // Measure the optimized set time using the same fixed-iteration workload as the timed phase.
+  opt_times.assign(9, 0.0);
+  optMaxIters = optNiters;
+  const double optTolerance = 0.0;
+  for (int i = 0; i < numberOfCalls; ++i)
+  {
+    double last_cummulative_time = opt_times[0];
+
+#ifndef HPCG_NO_LAIK
+    ZeroLaikVector(x_l); // start x at all zeros
+    ierr = CG_laik(A, data, b_l, x_l, optMaxIters, optTolerance, niters, normr, normr0, &opt_times[0], true);
+#else
+    ZeroVector(x); // start x at all zeros
+    ierr = CG(A, data, b, x, optMaxIters, optTolerance, niters, normr, normr0, &opt_times[0], true);
+#endif
+
+    if (ierr) ++err_count; // count the number of errors in CG
 
     double current_time = opt_times[0] - last_cummulative_time;
     if (current_time > opt_worst_time) opt_worst_time = current_time;
@@ -449,6 +466,11 @@ int main(int argc, char *argv[])
 
   double total_runtime = params.runningTime;
   int numberOfCgSets = int(total_runtime / opt_worst_time) + 1; // Run at least once, account for rounding
+  if (rank == 0) {
+    printf("Number of CG sets calculated: %d\n", numberOfCgSets);
+        printf("opt worst time calculated: %f\n", opt_worst_time);
+    fflush(stdout);
+  }
 #ifdef HPCG_DEBUG
   if (rank == 0)
   {
@@ -460,7 +482,6 @@ int main(int argc, char *argv[])
   /* This is the timed run for a specified amount of time. */
 
   optMaxIters = optNiters;
-  double optTolerance = 0.0; // Force optMaxIters iterations
   TestNormsData testnorms_data;
   testnorms_data.samples = numberOfCgSets;
   testnorms_data.values = new double[numberOfCgSets];
