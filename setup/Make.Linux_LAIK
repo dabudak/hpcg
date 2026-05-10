@@ -16,14 +16,14 @@ SRCdir       = $(TOPdir)/src
 INCdir       = $(TOPdir)/src
 BINdir       = $(TOPdir)/bin
 
-MPdir        = /home/sys_oneccl/intel/oneapi/mpi/2021.12
+MPdir        = /opt/intel/oneapi/mpi/2021.14
 MPinc        = -I$(MPdir)/include
 MPlib        = -Wl,-rpath,$(MPdir)/lib $(MPdir)/lib/libmpi.so.12
 
-# LAIK (built in /home/dbudak/laik)
-DEFS          = -DUSE_MPI -DUSE_TCP2
-LAIKLIB       = /home/dbudak/laik/liblaik.so
-LAIK_INCLUDES = -I/home/dbudak/laik/include -I/home/dbudak/laik/include/laik/
+# LAIK (built in /home/ge62gih2/laik)
+DEFS          = -DUSE_MPI
+LAIKLIB       = /home/ge62gih2/laik/liblaik.so
+LAIK_INCLUDES = -I/home/ge62gih2/laik/include -I/home/ge62gih2/laik/include/laik/
 LAIK_DEFS     = $(DEFS) $(LAIK_INCLUDES)
 
 HPCG_INCLUDES = -I$(INCdir) -I$(INCdir)/$(arch) $(MPinc) $(LAIK_INCLUDES)
@@ -39,9 +39,11 @@ HPCG_LIBS     = $(LAIKLIB) $(MPlib)
 HPCG_OPTS     = -DHPCG_NO_OPENMP
 HPCG_DEFS     = $(HPCG_OPTS) $(HPCG_INCLUDES)
 
-CXX          = g++
+#
+CXX          = mpicxx
+#CXXFLAGS     = $(HPCG_DEFS) -fomit-frame-pointer -O3 -funroll-loops -W -Wall
 CXXFLAGS     = $(HPCG_DEFS) -O3 -ffast-math -ftree-vectorize -ftree-vectorizer-verbose=0
-
+#
 LINKER       = $(CXX)
 LINKFLAGS    = $(CXXFLAGS)
 

@@ -39,7 +39,7 @@ int ComputeSYMGS_laik_ref(const SparseMatrix &A, const Laik_Blob *r, Laik_Blob *
 
   assert(x->localLength == A.localNumberOfRows);
 
-  laik_switchto_partitioning(x->values, A.ext, LAIK_DF_Preserve, LAIK_RO_Single);
+  laik_switchto_partitioning(x->values, A.ext, LAIK_DF_Preserve, LAIK_RO_None);
 
   const local_int_t nrow = A.localNumberOfRows;
   double **matrixDiagonal = A.matrixDiagonal; // An array of pointers to the diagonal entries A.matrixValues
@@ -53,27 +53,9 @@ int ComputeSYMGS_laik_ref(const SparseMatrix &A, const Laik_Blob *r, Laik_Blob *
   laik_get_map_1d(x->values, 0, (void **)&xv, 0);
   laik_get_map_1d(r->values, 0, (void **)&rv, 0);
 
-  const char* nan_check = std::getenv("HPCG_LAIK_NAN_CHECK");
-  if (nan_check && nan_check[0] != '\0') {
-    for (local_int_t i = 0; i < nrow; ++i) {
-      if (!std::isfinite(rv[i])) {
-        std::fprintf(stderr, "[rank %d] SYMGS r non-finite at %d: %g\n",
-                     A.geom ? A.geom->rank : -1, (int)i, rv[i]);
-        break;
-      }
-      if (!std::isfinite(xv[i])) {
-        std::fprintf(stderr, "[rank %d] SYMGS x non-finite at %d: %g\n",
-                     A.geom ? A.geom->rank : -1, (int)i, xv[i]);
-        break;
-      }
-    }
-  }
-
   if (A.rowD && A.valD && A.colD && A.rowsP) {
-    std::unordered_map<global_int_t, local_int_t> extMap;
-    extMap.reserve((size_t)A.numberOfExternalValues * 2 + 1);
-    for (local_int_t i = 0; i < A.numberOfExternalValues; ++i)
-      extMap[A.externalLocalToGlobal[i]] = A.localNumberOfRows + i;
+    assert(A.extMapBuilt);
+    const GlobalToLocalMap &extMap = A.extLocalMap;
 
     int mapCount = laik_my_mapcount(A.rowsP);
     for (int mapNo = 0; mapNo < mapCount; ++mapNo) {
@@ -120,7 +102,11 @@ int ComputeSYMGS_laik_ref(const SparseMatrix &A, const Laik_Blob *r, Laik_Blob *
             if (it != A.globalToLocalMap.end())
               lcol = it->second;
             else
-              lcol = extMap[gcol];
+            {
+              GlobalToLocalMap::const_iterator eit = extMap.find(gcol);
+              assert(eit != extMap.end());
+              lcol = eit->second;
+            }
             sum -= val[o] * xv[lcol];
           }
           sum += xv[li] * currentDiagonal;
@@ -131,10 +117,8 @@ int ComputeSYMGS_laik_ref(const SparseMatrix &A, const Laik_Blob *r, Laik_Blob *
     }
   } else {
     if (A.rowD && A.valD && A.colD && A.rowsP) {
-      std::unordered_map<global_int_t, local_int_t> extMap;
-      extMap.reserve((size_t)A.numberOfExternalValues * 2 + 1);
-      for (local_int_t i = 0; i < A.numberOfExternalValues; ++i)
-        extMap[A.externalLocalToGlobal[i]] = A.localNumberOfRows + i;
+      assert(A.extMapBuilt);
+      const GlobalToLocalMap &extMap = A.extLocalMap;
 
       int mapCount = laik_my_mapcount(A.rowsP);
       for (int mapNo = 0; mapNo < mapCount; ++mapNo) {
@@ -181,7 +165,11 @@ int ComputeSYMGS_laik_ref(const SparseMatrix &A, const Laik_Blob *r, Laik_Blob *
               if (it != A.globalToLocalMap.end())
                 lcol = it->second;
               else
-                lcol = extMap[gcol];
+              {
+                GlobalToLocalMap::const_iterator eit = extMap.find(gcol);
+                assert(eit != extMap.end());
+                lcol = eit->second;
+              }
               sum -= val[o] * xv[lcol];
             }
             sum += xv[li] * currentDiagonal;
@@ -212,23 +200,11 @@ int ComputeSYMGS_laik_ref(const SparseMatrix &A, const Laik_Blob *r, Laik_Blob *
     }
   }
 
-  if (nan_check && nan_check[0] != '\0') {
-    for (local_int_t i = 0; i < nrow; ++i) {
-      if (!std::isfinite(xv[i])) {
-        std::fprintf(stderr, "[rank %d] SYMGS forward non-finite at %d: %g\n",
-                     A.geom ? A.geom->rank : -1, (int)i, xv[i]);
-        break;
-      }
-    }
-  }
-
   // Now the back sweep.
 
   if (A.rowD && A.valD && A.colD && A.rowsP) {
-    std::unordered_map<global_int_t, local_int_t> extMap;
-    extMap.reserve((size_t)A.numberOfExternalValues * 2 + 1);
-    for (local_int_t i = 0; i < A.numberOfExternalValues; ++i)
-      extMap[A.externalLocalToGlobal[i]] = A.localNumberOfRows + i;
+    assert(A.extMapBuilt);
+    const GlobalToLocalMap &extMap = A.extLocalMap;
 
     int mapCount = laik_my_mapcount(A.rowsP);
     for (int mapNo = mapCount - 1; mapNo >= 0; --mapNo) {
@@ -275,7 +251,11 @@ int ComputeSYMGS_laik_ref(const SparseMatrix &A, const Laik_Blob *r, Laik_Blob *
             if (it != A.globalToLocalMap.end())
               lcol = it->second;
             else
-              lcol = extMap[gcol];
+            {
+              GlobalToLocalMap::const_iterator eit = extMap.find(gcol);
+              assert(eit != extMap.end());
+              lcol = eit->second;
+            }
             sum -= val[o] * xv[lcol];
           }
           sum += xv[li] * currentDiagonal;
@@ -286,10 +266,8 @@ int ComputeSYMGS_laik_ref(const SparseMatrix &A, const Laik_Blob *r, Laik_Blob *
     }
   } else {
     if (A.rowD && A.valD && A.colD && A.rowsP) {
-      std::unordered_map<global_int_t, local_int_t> extMap;
-      extMap.reserve((size_t)A.numberOfExternalValues * 2 + 1);
-      for (local_int_t i = 0; i < A.numberOfExternalValues; ++i)
-        extMap[A.externalLocalToGlobal[i]] = A.localNumberOfRows + i;
+      assert(A.extMapBuilt);
+      const GlobalToLocalMap &extMap = A.extLocalMap;
 
       int mapCount = laik_my_mapcount(A.rowsP);
       for (int mapNo = mapCount - 1; mapNo >= 0; --mapNo) {
@@ -358,7 +336,11 @@ int ComputeSYMGS_laik_ref(const SparseMatrix &A, const Laik_Blob *r, Laik_Blob *
               if (it != A.globalToLocalMap.end())
                 lcol = it->second;
               else
-                lcol = extMap[gcol];
+              {
+                GlobalToLocalMap::const_iterator eit = extMap.find(gcol);
+                assert(eit != extMap.end());
+                lcol = eit->second;
+              }
               sum -= val[o] * xv[lcol];
             }
             sum += xv[li] * currentDiagonal;
@@ -387,18 +369,8 @@ int ComputeSYMGS_laik_ref(const SparseMatrix &A, const Laik_Blob *r, Laik_Blob *
     }
   }
 
-  if (nan_check && nan_check[0] != '\0') {
-    for (local_int_t i = 0; i < nrow; ++i) {
-      if (!std::isfinite(xv[i])) {
-        std::fprintf(stderr, "[rank %d] SYMGS backward non-finite at %d: %g\n",
-                     A.geom ? A.geom->rank : -1, (int)i, xv[i]);
-        break;
-      }
-    }
-  }
-
   // Preserve updated x when switching back to local partitioning.
-  laik_switchto_partitioning(x->values, A.local, LAIK_DF_Preserve, LAIK_RO_Single);
+  laik_switchto_partitioning(x->values, A.local, LAIK_DF_Preserve, LAIK_RO_None);
 
   return 0;
 }

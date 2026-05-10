@@ -67,100 +67,6 @@ using std::endl;
 #include "TestSymmetry.hpp"
 #include "TestNorms.hpp"
 
-#ifndef HPCG_NO_LAIK
-static void SpmvCheckLaik(const SparseMatrix &A, const char *label)
-{
-  const char *spmv_check = std::getenv("HPCG_LAIK_SPMV_CHECK");
-  if (!spmv_check || spmv_check[0] == '\0')
-    return;
-
-  if (A.numberOfExternalValues != 0)
-  {
-    if (A.geom && A.geom->rank == 0)
-      std::cout << "SpMV check skipped (external values present) for " << label << std::endl;
-    return;
-  }
-
-  Laik_Blob *x_check = init_blob(A, true, "spmv_x");
-  Laik_Blob *b_check = init_blob(A, false, "spmv_b");
-
-  double *xv = 0;
-  uint64_t xcount = 0;
-  laik_get_map_1d(x_check->values, 0, (void **)&xv, &xcount);
-  for (uint64_t i = 0; i < x_check->localLength; ++i)
-    xv[i] = (double)(i + 1);
-
-  ComputeSPMV_laik_ref(A, x_check, b_check);
-
-  double *bv = 0;
-  laik_get_map_1d(b_check->values, 0, (void **)&bv, 0);
-  laik_get_map_1d(x_check->values, 0, (void **)&xv, &xcount);
-
-  Vector x_ref, y_ref;
-  InitializeVector(x_ref, A.localNumberOfRows);
-  InitializeVector(y_ref, A.localNumberOfRows);
-  for (uint64_t i = 0; i < x_ref.localLength; ++i)
-    x_ref.values[i] = xv[i];
-
-  for (local_int_t i = 0; i < A.localNumberOfRows; ++i)
-  {
-    double sum = 0.0;
-    const double *const cur_vals = A.matrixValues[i];
-    const local_int_t *const cur_inds = A.mtxIndL[i];
-    const int cur_nnz = A.nonzerosInRow[i];
-    for (int j = 0; j < cur_nnz; ++j)
-      sum += cur_vals[j] * x_ref.values[cur_inds[j]];
-    y_ref.values[i] = sum;
-  }
-
-  double max_diff = 0.0;
-  double sum_diff = 0.0;
-  const char *spmv_diff = std::getenv("HPCG_LAIK_SPMV_DIFF");
-  int printed = 0;
-  for (local_int_t i = 0; i < A.localNumberOfRows; ++i)
-  {
-    double diff = std::fabs(y_ref.values[i] - bv[i]);
-    if (diff > max_diff)
-      max_diff = diff;
-    sum_diff += diff;
-    if (spmv_diff && spmv_diff[0] != '\0' && diff != 0.0 && printed < 5)
-    {
-      std::cout << "SpMV diff row " << i
-                << " y_ref=" << y_ref.values[i]
-                << " y_csr=" << bv[i]
-                << " diff=" << diff << std::endl;
-      if (printed == 0)
-      {
-        const int cur_nnz = A.nonzerosInRow[i];
-        const local_int_t *const cur_inds = A.mtxIndL[i];
-        const double *const cur_vals = A.matrixValues[i];
-        std::cout << "Row " << i << " nnz=" << cur_nnz << " entries:";
-        for (int j = 0; j < cur_nnz; ++j)
-        {
-          local_int_t idx = cur_inds[j];
-          double xval = (idx >= 0 && idx < x_ref.localLength) ? x_ref.values[idx] : 0.0;
-          std::cout << " (" << idx << "," << cur_vals[j] << ",x=" << xval << ")";
-        }
-        std::cout << std::endl;
-      }
-      printed++;
-    }
-  }
-
-  double gmax = 0.0;
-  double gsum = 0.0;
-  laik_allreduce(&max_diff, &gmax, 1, laik_Double, LAIK_RO_Max);
-  laik_allreduce(&sum_diff, &gsum, 1, laik_Double, LAIK_RO_Sum);
-  if (A.geom && A.geom->rank == 0)
-    std::cout << "SpMV check (" << label << "): max diff=" << gmax << " sum diff=" << gsum << std::endl;
-
-  DeleteVector(x_ref);
-  DeleteVector(y_ref);
-  DeleteLaikVector(x_check);
-  DeleteLaikVector(b_check);
-}
-#endif
-
 #ifdef HPCG_NO_LAIK
 static void SpmvCheckMPI(const SparseMatrix &A, const Vector &b)
 {
@@ -346,52 +252,6 @@ int main(int argc, char *argv[])
     CopyVectorToLaikVector(b, b_l);
     CopyVectorToLaikVector(x, x_l);
     CopyVectorToLaikVector(xexact, xexact_l);
-
-    // --- LAIK SpMV correctness check (A * 1 vs b) ---
-    std::string xcheck_name{"x_check"};
-    std::string bcheck_name{"b_check"};
-    Laik_Blob *x_check = init_blob(A, true, xcheck_name.data());
-    Laik_Blob *b_check = init_blob(A, false, bcheck_name.data());
-
-    double *xv = 0;
-    uint64_t xcount = 0;
-    laik_get_map_1d(x_check->values, 0, (void **)&xv, &xcount);
-    for (uint64_t i = 0; i < x_check->localLength; ++i) {
-      xv[i] = 1.0;
-    }
-
-    ComputeSPMV_laik_ref(A, x_check, b_check);
-
-    double local_sum = 0.0;
-    double *bv = 0;
-    laik_get_map_1d(b_check->values, 0, (void **)&bv, 0);
-    for (uint64_t i = 0; i < b_check->localLength; ++i) {
-      local_sum += bv[i];
-    }
-
-    double local_bsum = 0.0;
-    double *bvv = 0;
-    laik_get_map_1d(b_l->values, 0, (void **)&bvv, 0);
-    for (uint64_t i = 0; i < b_l->localLength; ++i) {
-      local_bsum += bvv[i];
-    }
-
-    double sum = 0.0;
-    double bsum = 0.0;
-    laik_allreduce(&local_sum, &sum, 1, laik_Double, LAIK_RO_Sum);
-    laik_allreduce(&local_bsum, &bsum, 1, laik_Double, LAIK_RO_Sum);
-
-    if (rank == 0) {
-      std::cout << "SpMV sum: " << sum << std::endl;
-      std::cout << "b sum: " << bsum << std::endl;
-      std::cout << "Diff (SpMV - b): " << (sum - bsum) << std::endl;
-    }
-
-    SpmvCheckLaik(A, "fine");
-
-    DeleteLaikVector(x_check);
-    DeleteLaikVector(b_check);
-    // --- End LAIK SpMV correctness check ---
   }
 
 #ifdef REPARTITION
@@ -407,17 +267,6 @@ int main(int argc, char *argv[])
     GenerateCoarseProblem(*curLevelMatrix);
     curLevelMatrix = curLevelMatrix->Ac; // Make the just-constructed coarse grid the next level
   }
-
-#ifndef HPCG_NO_LAIK
-  if (iter == 0) {
-    SparseMatrix *checkLevel = A.Ac;
-    for (int level = 1; level < numberOfMgLevels && checkLevel; ++level) {
-      std::string label = std::string("coarseL") + std::to_string(level);
-      SpmvCheckLaik(*checkLevel, label.c_str());
-      checkLevel = checkLevel->Ac;
-    }
-  }
-#endif
 
   setup_time = mytimer() - setup_time; // Capture total time of setup
   times[9] = setup_time;               // Save it for reporting
@@ -607,11 +456,9 @@ int main(int argc, char *argv[])
   double opt_worst_time = 0.0;
 
   std::vector<double> opt_times(9, 0.0);
-  // Compute the residual reduction and residual count for the user ordering and optimized kernels.
+  // First determine how many iterations optimized CG needs to reach the reference residual.
   for (int i = 0; i < numberOfCalls; ++i)
   {
-    double last_cummulative_time = opt_times[0];
-
 #ifndef HPCG_NO_LAIK
     ZeroLaikVector(x_l); // start x at all zeros
     ierr = CG_laik(A, data, b_l, x_l, optMaxIters, refTolerance, niters, normr, normr0, &opt_times[0], true);
@@ -626,6 +473,25 @@ int main(int argc, char *argv[])
 
     // pick the largest number of iterations to guarantee convergence
     if (niters > optNiters) optNiters = niters;
+  }
+
+  // Measure the optimized set time using the same fixed-iteration workload as the timed phase.
+  opt_times.assign(9, 0.0);
+  optMaxIters = optNiters;
+  const double optTolerance = 0.0;
+  for (int i = 0; i < numberOfCalls; ++i)
+  {
+    double last_cummulative_time = opt_times[0];
+
+#ifndef HPCG_NO_LAIK
+    ZeroLaikVector(x_l); // start x at all zeros
+    ierr = CG_laik(A, data, b_l, x_l, optMaxIters, optTolerance, niters, normr, normr0, &opt_times[0], true);
+#else
+    ZeroVector(x); // start x at all zeros
+    ierr = CG(A, data, b, x, optMaxIters, optTolerance, niters, normr, normr0, &opt_times[0], true);
+#endif
+
+    if (ierr) ++err_count; // count the number of errors in CG
 
     double current_time = opt_times[0] - last_cummulative_time;
     if (current_time > opt_worst_time) opt_worst_time = current_time;
@@ -660,6 +526,11 @@ int main(int argc, char *argv[])
 
   double total_runtime = params.runningTime;
   int numberOfCgSets = int(total_runtime / opt_worst_time) + 1; // Run at least once, account for rounding
+  if (rank == 0) {
+    printf("Number of CG sets calculated: %d\n", numberOfCgSets);
+    printf("opt worst time calculated: %f\n", opt_worst_time);
+    fflush(stdout);
+  }
 #ifdef HPCG_DEBUG
   if (rank == 0)
   {
@@ -671,7 +542,6 @@ int main(int argc, char *argv[])
   /* This is the timed run for a specified amount of time. */
 
   optMaxIters = optNiters;
-  double optTolerance = 0.0; // Force optMaxIters iterations
   TestNormsData testnorms_data;
   testnorms_data.samples = numberOfCgSets;
   testnorms_data.values = new double[numberOfCgSets];

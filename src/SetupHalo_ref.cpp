@@ -169,11 +169,20 @@ void SetupHalo_ref(SparseMatrix & A) {
   }
 
 #ifndef HPCG_NO_LAIK
-  // ########## Data for partitioning algorithm
-  partition_d *pt_data_local = (partition_d *)malloc(sizeof(partition_d));
-  partition_d *pt_data_ext = (partition_d *)malloc(sizeof(partition_d));
+  A.extLocalMap.clear();
+#if __cplusplus >= 201103L
+  A.extLocalMap.reserve((size_t)A.numberOfExternalValues * 2 + 1);
+#endif
+  for (local_int_t i = 0; i < A.numberOfExternalValues; ++i) {
+    A.extLocalMap[A.externalLocalToGlobal[i]] = A.localNumberOfRows + i;
+  }
+  A.extMapBuilt = true;
+#endif
 
-  std::memcpy((void *)&pt_data_ext->receiveList, (void *)&receiveList, sizeof(receiveList));
+#ifndef HPCG_NO_LAIK
+  // ########## Data for partitioning algorithm
+  partition_d *pt_data_local = new partition_d();
+  partition_d *pt_data_ext = new partition_d();
 
   init_partition_data(A, pt_data_local, pt_data_ext);
 

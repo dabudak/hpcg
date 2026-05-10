@@ -67,6 +67,8 @@ using GlobalToLocalMap = std::unordered_map< global_int_t, local_int_t >;
       double **matrixDiagonal;                    //!< values of matrix diagonal entries
       GlobalToLocalMap globalToLocalMap;          //!< global-to-local mapping
       std::vector<global_int_t> localToGlobalMap; //!< local-to-global mapping
+      GlobalToLocalMap extLocalMap;
+      mutable bool extMapBuilt;
       mutable bool isDotProductOptimized;
       mutable bool isSpmvOptimized;
       mutable bool isMgOptimized;
@@ -106,6 +108,7 @@ using GlobalToLocalMap = std::unordered_map< global_int_t, local_int_t >;
   Laik_Data *rowD;
   Laik_Data *valD;
   Laik_Data *colD;
+  mutable bool colDIsLocal;
   Laik_Data *matrixDiagonal_d;
   Laik_Blob *x_blob;
   Laik_Blob *b_blob;
@@ -158,6 +161,8 @@ inline void InitializeSparseMatrix(SparseMatrix & A, Geometry * geom) {
   A.mtxIndL = 0;
   A.matrixValues = 0;
   A.matrixDiagonal = 0;
+  A.extLocalMap.clear();
+  A.extMapBuilt = false;
 
   // Optimization is ON by default. The code that switches it OFF is in the
   // functions that are meant to be optimized.
@@ -190,6 +195,7 @@ inline void InitializeSparseMatrix(SparseMatrix & A, Geometry * geom) {
   A.rowD = 0;
   A.valD = 0;
   A.colD = 0;
+  A.colDIsLocal = false;
   A.matrixDiagonal_d = 0;
   A.x_blob = 0;
   A.b_blob = 0;

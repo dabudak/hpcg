@@ -15,6 +15,10 @@ void partitioner_alg_for_x_vector(Laik_RangeReceiver* r, Laik_PartitionerParams*
   int rank = data->geom->rank;
   Laik_Range range;
 
+  // Group contiguous global rows by owner to avoid creating one LAIK range
+  // object per equation for the common local-ownership part of the vector.
+  int prev_owner = -1;
+  global_int_t seg_start = 0;
   for (global_int_t i = 0; i < data->size; i++) {
     int proc = ComputeRankOfMatrixRow(*data->geom, i);
     if (proc < 0 || proc >= data->geom->size) {
@@ -22,8 +26,24 @@ void partitioner_alg_for_x_vector(Laik_RangeReceiver* r, Laik_PartitionerParams*
               proc, (long long)i, data->geom->size);
       proc = data->geom->rank;
     }
-    laik_range_init_1d(&range, x_space, i, i + 1);
-    laik_append_range(r, proc, &range, 1, 0);
+
+    if (prev_owner == -1) {
+      prev_owner = proc;
+      seg_start = i;
+      continue;
+    }
+
+    if (proc != prev_owner) {
+      laik_range_init_1d(&range, x_space, seg_start, i);
+      laik_append_range(r, prev_owner, &range, 1, 0);
+      prev_owner = proc;
+      seg_start = i;
+    }
+  }
+
+  if (prev_owner != -1) {
+    laik_range_init_1d(&range, x_space, seg_start, data->size);
+    laik_append_range(r, prev_owner, &range, 1, 0);
   }
 
   if (data->halo) {
@@ -105,6 +125,7 @@ Laik_Blob* init_blob(const SparseMatrix& A, bool exchangesValues, const char* na
   blob->localLength = A.localNumberOfRows;
   blob->exchangesValues = exchangesValues;
   blob->name = name;
+  blob->reservation = 0;
   laik_data_set_name(blob->values, const_cast<char*>(name));
 
   // Vector layout with stable external mapping
@@ -303,6 +324,10 @@ void CopyLaikVectorToVector(Laik_Blob* x, Vector& v)
 void DeleteLaikVector(Laik_Blob* x)
 {
   x->localLength = 0;
+  if (x->reservation) {
+    laik_reservation_free(x->reservation);
+    x->reservation = 0;
+  }
   laik_free(x->values);
   x->values = NULL;
 }

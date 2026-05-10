@@ -85,6 +85,7 @@ struct Laik_Blob
     Laik_Data *values;
     bool exchangesValues;
     mutable local_int_t localLength;
+    Laik_Reservation *reservation;
 };
 
 /*
